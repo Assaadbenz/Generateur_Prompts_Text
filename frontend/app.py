@@ -37,6 +37,8 @@ if 'search_query' not in st.session_state:
     st.session_state.search_query = ""
 if 'saved_mission' not in st.session_state:
     st.session_state.saved_mission = ""
+if 'optimization_result' not in st.session_state:
+    st.session_state.optimization_result = None
 
 
 def fetch_prompts(limit: int = 5, offset: int = 0) -> tuple:
@@ -49,6 +51,7 @@ def fetch_prompts(limit: int = 5, offset: int = 0) -> tuple:
         if response.status_code == 200:
             data = response.json()
             return data.get("prompts", []), data.get("total", 0), data.get("limit", limit), data.get("offset", offset)
+        st.error(f"Erreur API ({response.status_code})")
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur de connexion à l'API: {e}")
     return [], 0, limit, offset
@@ -64,6 +67,7 @@ def search_prompts_api(query: str, limit: int = 5, offset: int = 0) -> tuple:
         if response.status_code == 200:
             data = response.json()
             return data.get("prompts", []), data.get("total", 0), data.get("limit", limit), data.get("offset", offset)
+        st.error(f"Erreur API ({response.status_code})")
     except requests.exceptions.RequestException as e:
         st.error(f"Erreur de connexion: {e}")
     return [], 0, limit, offset
@@ -144,8 +148,10 @@ def delete_prompt_from_db(prompt_id: int) -> bool:
         )
         if response.status_code == 200:
             return True
+        st.error(f"Erreur lors de la suppression ({response.status_code})")
         return False
     except requests.exceptions.RequestException:
+        st.error("Erreur de connexion lors de la suppression")
         return False
 
 
@@ -208,6 +214,7 @@ with col_form:
                         session.generated_prompt = result.get("prompt_text")
                         session.quality_score = result.get("score")
                         session.saved_mission = mission
+                        session.optimization_result = None
                         st.success("Prompt généré! ✓")
             else:
                 st.warning("Remplissez l'expertise et la mission")
@@ -218,11 +225,19 @@ with col_form:
                 with st.spinner("Optimisation en cours..."):
                     result = optimize_prompt(session.generated_prompt)
                     if result:
-                        st.info(f"Score initial: {session.quality_score}")
-                        if result.get("missing_keywords"):
-                            st.warning(f"Mots-clés manquants: {', '.join(result['missing_keywords'])}")
+                        session.quality_score = result.get("score")
+                        session.optimization_result = result
+                        st.toast("✅ Optimisation terminée", icon="🔧")
             else:
                 st.warning("Générez d'abord un prompt")
+    
+    # Suggestions d'optimisation sous le bouton
+    if session.optimization_result:
+        st.markdown("---")
+        st.markdown("### 🔧 Suggestions d'optimisation")
+        for s in session.optimization_result.get("suggestions", []):
+            st.markdown(f"- {s}")
+        st.caption(f"Score : {session.optimization_result.get('score', session.quality_score)}/100")
 
 
 # ============================================================================
@@ -245,7 +260,7 @@ with col_result:
         # Bouton pour sauvegarder
         col_save1, col_save2 = st.columns(2)
         with col_save1:
-            titre_save = st.text_input("Titre du prompt", value=f"Prompt {session.saved_mission[:20]}")
+            titre_save = st.text_input("Titre du prompt", value=f"Prompt {session.saved_mission[:20]}", key="titre_save")
         with col_save2:
             if st.button("💾 Sauvegarder", use_container_width=True):
                 if titre_save:
