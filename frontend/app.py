@@ -35,6 +35,8 @@ if 'prompts_offset' not in st.session_state:
     st.session_state.prompts_offset = 0
 if 'search_query' not in st.session_state:
     st.session_state.search_query = ""
+if 'saved_mission' not in st.session_state:
+    st.session_state.saved_mission = ""
 
 
 def fetch_prompts(limit: int = 5, offset: int = 0) -> tuple:
@@ -205,6 +207,7 @@ with col_form:
                     if result:
                         session.generated_prompt = result.get("prompt_text")
                         session.quality_score = result.get("score")
+                        session.saved_mission = mission
                         st.success("Prompt généré! ✓")
             else:
                 st.warning("Remplissez l'expertise et la mission")
@@ -242,7 +245,7 @@ with col_result:
         # Bouton pour sauvegarder
         col_save1, col_save2 = st.columns(2)
         with col_save1:
-            titre_save = st.text_input("Titre du prompt", value=f"Prompt {mission[:20]}")
+            titre_save = st.text_input("Titre du prompt", value=f"Prompt {session.saved_mission[:20]}")
         with col_save2:
             if st.button("💾 Sauvegarder", use_container_width=True):
                 if titre_save:

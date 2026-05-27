@@ -1,5 +1,4 @@
-venv/
+prompts.db
 __pycache__/
 *.pyc
-prompts.db
 .env

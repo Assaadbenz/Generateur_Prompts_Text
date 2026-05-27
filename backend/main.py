@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import Dict, Any
 import sys
 from pathlib import Path
 
@@ -21,8 +21,7 @@ app = FastAPI(
 # Configuration CORS pour Streamlit
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permet toutes les origines
-    allow_credentials=True,
+    allow_origins=["http://localhost:8501"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -34,33 +33,27 @@ init_db()
 # ============================================================================
 # Modèles Pydantic
 # ============================================================================
-class PromptRequest(BaseModel):
-    expertise: str
-    mission: str
-    tone: str
-    output_format: str = "Texte"
-    length: str = "Moyenne"
-
-
 LENGTH_WORDS = {"Courte": 100, "Moyenne": 300, "Longue": 500}
+VALID_TONES = ["Très formel", "Formel", "Neutre", "Décontracté", "Très décontracté"]
+VALID_FORMATS = ["Texte", "Liste", "Tableau", "Code"]
+
+
+class PromptRequest(BaseModel):
+    expertise: str = Field(..., min_length=1, description="Domaine d'expertise")
+    mission: str = Field(..., min_length=1, description="Mission à accomplir")
+    tone: str = Field(..., description="Ton souhaité")
+    output_format: str = Field(default="Texte", description="Format de sortie")
+    length: str = Field(default="Moyenne", description="Longueur du prompt")
 
 
 class PromptResponse(BaseModel):
-    titre: str
-    prompt_text: str
-    score: int
+    titre: str = Field(..., min_length=1)
+    prompt_text: str = Field(..., min_length=1)
+    score: int = Field(..., ge=0, le=100)
 
 
 class PromptOptimize(BaseModel):
-    prompt_text: str
-
-
-class PromptStored(BaseModel):
-    id: int
-    titre: str
-    categorie: str
-    prompt_text: str
-    score: int
+    prompt_text: str = Field(..., min_length=1)
 
 
 # ============================================================================
@@ -78,10 +71,11 @@ async def generate_prompt(request: PromptRequest) -> Dict[str, Any]:
     Génère un prompt basé sur les paramètres fournis.
     
     Args:
-        role: Le rôle/personnalité du prompt
-        task: La tâche à accomplir
-        context: Le contexte de la tâche
-        tone: Le ton souhaité
+        request.expertise: Domaine d'expertise
+        request.mission: Mission à accomplir
+        request.tone: Ton souhaité
+        request.output_format: Format de sortie
+        request.length: Longueur du prompt
     
     Returns:
         Prompt généré avec son score de qualité
@@ -134,9 +128,10 @@ async def optimize(request: PromptOptimize) -> Dict[str, Any]:
 @app.get("/prompts")
 async def list_prompts(limit: int = 50, offset: int = 0) -> Dict[str, Any]:
     try:
-        prompts = get_all_prompts(limit=min(limit, 100), offset=max(offset, 0))
+        clamped_limit = min(limit, 100)
+        prompts = get_all_prompts(limit=clamped_limit, offset=max(offset, 0))
         total = count_prompts()
-        return {"total": total, "limit": limit, "offset": offset, "prompts": prompts}
+        return {"total": total, "limit": clamped_limit, "offset": offset, "prompts": prompts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -146,9 +141,10 @@ async def search_prompts_route(q: str = "", limit: int = 50, offset: int = 0) ->
     try:
         if not q or not q.strip():
             return await list_prompts(limit=limit, offset=offset)
-        prompts = search_prompts(query=q.strip(), limit=min(limit, 100), offset=max(offset, 0))
+        clamped_limit = min(limit, 100)
+        prompts = search_prompts(query=q.strip(), limit=clamped_limit, offset=max(offset, 0))
         total = count_search_prompts(query=q.strip())
-        return {"total": total, "limit": limit, "offset": offset, "prompts": prompts}
+        return {"total": total, "limit": clamped_limit, "offset": offset, "prompts": prompts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
