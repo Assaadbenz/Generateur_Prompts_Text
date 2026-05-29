@@ -2,6 +2,11 @@ import streamlit as st
 import requests
 from typing import List, Dict, Any
 import pyperclip
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configuration de la page
 st.set_page_config(
@@ -11,13 +16,26 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# URL de l'API
-API_BASE_URL = "http://localhost:8000"
+# URL de l'API - read from environment or use default
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
 # ============================================================================
 # Fonctions utilitaires
 # ============================================================================
+@st.cache_resource
+def check_api_health():
+    """Check if API is running, cache the result."""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/health",
+            timeout=2
+        )
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+
 def copy_to_clipboard(text: str):
     try:
         pyperclip.copy(text)
@@ -89,10 +107,21 @@ def generate_prompt(expertise: str, mission: str, tone: str, output_format: str,
         )
         if response.status_code == 200:
             return response.json()
-        st.error(f"Erreur API: {response.status_code}")
+        elif response.status_code == 422:
+            error_details = response.json().get("detail", "Erreur de validation")
+            st.error(f"❌ Erreur de validation: {error_details}")
+            return None
+        else:
+            st.error(f"❌ Erreur API: {response.status_code} - {response.text}")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("❌ Timeout: L'API met trop de temps à répondre")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error(f"❌ Erreur de connexion: Impossible de se connecter à {API_BASE_URL}")
         return None
     except requests.exceptions.RequestException as e:
-        st.error(f"Erreur de connexion: {e}")
+        st.error(f"❌ Erreur de connexion: {e}")
         return None
 
 
@@ -107,11 +136,21 @@ def optimize_prompt(prompt_text: str) -> Dict[str, Any]:
         )
         if response.status_code == 200:
             return response.json()
-        else:
-            st.error(f"Erreur API: {response.status_code}")
+        elif response.status_code == 422:
+            error_details = response.json().get("detail", "Erreur de validation")
+            st.error(f"❌ Erreur de validation: {error_details}")
             return None
+        else:
+            st.error(f"❌ Erreur API: {response.status_code}")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("❌ Timeout: L'API met trop de temps à répondre")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error(f"❌ Erreur de connexion: Impossible de se connecter à {API_BASE_URL}")
+        return None
     except requests.exceptions.RequestException as e:
-        st.error(f"Erreur de connexion: {e}")
+        st.error(f"❌ Erreur de connexion: {e}")
         return None
 
 
@@ -131,11 +170,21 @@ def save_prompt_to_db(titre: str, prompt_text: str, score: int) -> bool:
         if response.status_code == 200:
             st.success("Prompt sauvegardé avec succès! ✓")
             return True
-        else:
-            st.error(f"Erreur lors de la sauvegarde: {response.status_code}")
+        elif response.status_code == 422:
+            error_details = response.json().get("detail", "Erreur de validation")
+            st.error(f"❌ Erreur de validation: {error_details}")
             return False
+        else:
+            st.error(f"❌ Erreur lors de la sauvegarde: {response.status_code}")
+            return False
+    except requests.exceptions.Timeout:
+        st.error("❌ Timeout: L'API met trop de temps à répondre")
+        return False
+    except requests.exceptions.ConnectionError:
+        st.error(f"❌ Erreur de connexion: Impossible de se connecter à {API_BASE_URL}")
+        return False
     except requests.exceptions.RequestException as e:
-        st.error(f"Erreur de connexion: {e}")
+        st.error(f"❌ Erreur de connexion: {e}")
         return False
 
 
@@ -158,6 +207,18 @@ def delete_prompt_from_db(prompt_id: int) -> bool:
 # ============================================================================
 # Interface principale
 # ============================================================================
+# Check API health on startup
+if not check_api_health():
+    st.error(f"""
+    ❌ **Impossible de se connecter à l'API**
+    
+    Assurez-vous que:
+    1. L'API FastAPI est en cours d'exécution: `python -m uvicorn backend.main:app --reload`
+    2. L'URL de l'API est correcte: {API_BASE_URL}
+    3. Vérifiez le fichier `.env` pour API_BASE_URL
+    """)
+    st.stop()
+
 st.title("✨ Générateur et Optimiseur de Prompts")
 st.markdown("Créez et optimisez des prompts de qualité pour vos modèles IA")
 

@@ -18,6 +18,34 @@ backend_dir.mkdir(exist_ok=True)
 frontend_dir.mkdir(exist_ok=True)
 
 # ============================================================================
+# 0. .env.example
+# ============================================================================
+env_content = """# FastAPI Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+API_RELOAD=true
+ENVIRONMENT=development
+
+# CORS Configuration
+ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501,http://localhost:8000
+
+# Database
+DATABASE_PATH=./prompts.db
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FILE=./logs/app.log
+
+# Frontend Configuration
+API_BASE_URL=http://localhost:8000
+"""
+
+env_path = PROJECT_ROOT / ".env.example"
+with open(env_path, "w", encoding="utf-8") as f:
+    f.write(env_content)
+print(f"✓ Créé: {env_path}")
+
+# ============================================================================
 # 1. requirements.txt
 # ============================================================================
 requirements_content = """fastapi==0.104.1
@@ -25,6 +53,10 @@ uvicorn==0.24.0
 streamlit==1.28.1
 requests==2.31.0
 pydantic==2.4.2
+pyperclip==1.8.2
+python-dotenv==1.0.0
+pytest==7.4.3
+pytest-asyncio==0.21.1
 """
 
 requirements_path = PROJECT_ROOT / "requirements.txt"
@@ -33,100 +65,249 @@ with open(requirements_path, "w", encoding="utf-8") as f:
 print(f"✓ Créé: {requirements_path}")
 
 # ============================================================================
-# 2. backend/database.py
+# 2. backend/config.py
 # ============================================================================
-database_content = """import sqlite3
+config_content = """\"\"\"Configuration management for the application.\"\"\"
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+else:
+    # Use .env.example as fallback
+    load_dotenv(Path(__file__).parent.parent / ".env.example")
+
+
+class Config:
+    \"\"\"Application configuration.\"\"\"
+    
+    # API Configuration
+    API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
+    API_PORT: int = int(os.getenv("API_PORT", 8000))
+    API_RELOAD: bool = os.getenv("API_RELOAD", "true").lower() == "true"
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    
+    # CORS Configuration
+    ALLOWED_ORIGINS: list = os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:8000"
+    ).split(",")
+    
+    # Database
+    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "./prompts.db")
+    
+    # Logging
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FILE: str = os.getenv("LOG_FILE", "./logs/app.log")
+    
+    # Derived
+    IS_PRODUCTION: bool = ENVIRONMENT == "production"
+    IS_DEVELOPMENT: bool = ENVIRONMENT == "development"
+
+
+config = Config()
+"""
+
+config_path = backend_dir / "config.py"
+with open(config_path, "w", encoding="utf-8") as f:
+    f.write(config_content)
+print(f"✓ Créé: {config_path}")
+
+# ============================================================================
+# 3. backend/logger.py
+# ============================================================================
+logger_content = """\"\"\"Logging configuration for the application.\"\"\"
+import logging
+import os
+from pathlib import Path
+from .config import config
+
+# Create logs directory if it doesn't exist
+log_dir = Path(config.LOG_FILE).parent
+log_dir.mkdir(exist_ok=True)
+
+# Configure logger
+logger = logging.getLogger(__name__)
+logger.setLevel(getattr(logging, config.LOG_LEVEL))
+
+# File handler
+file_handler = logging.FileHandler(config.LOG_FILE)
+file_handler.setLevel(getattr(logging, config.LOG_LEVEL))
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(getattr(logging, config.LOG_LEVEL))
+
+# Formatter
+formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Add handlers
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+# Prevent duplicate logs
+logger.propagate = False
+"""
+
+logger_path = backend_dir / "logger.py"
+with open(logger_path, "w", encoding="utf-8") as f:
+    f.write(logger_content)
+print(f"✓ Créé: {logger_path}")
+
+# ============================================================================
+# 4. backend/database.py
+# ============================================================================
+database_content = """\"\"\"Database operations for prompt storage.\"\"\"
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from .config import config
+from .logger import logger
 
 # Chemin vers la base de données
-DB_PATH = Path(__file__).parent.parent / "prompts.db"
+DB_PATH = Path(config.DATABASE_PATH)
+
+
+@contextmanager
+def get_db_connection():
+    \"\"\"Context manager for database connections.\"\"\"
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Database error: {e}")
+        raise
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
     \"\"\"Initialise la base SQLite avec la table 'prompts'.\"\"\"
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS prompts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        titre TEXT NOT NULL,
-        categorie TEXT NOT NULL,
-        prompt_text TEXT NOT NULL,
-        score INTEGER DEFAULT 0
-    )
-    ''')
-    
-    conn.commit()
-    conn.close()
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS prompts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                titre TEXT NOT NULL,
+                categorie TEXT NOT NULL,
+                prompt_text TEXT NOT NULL,
+                score INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
 
 
 def save_prompt(titre: str, categorie: str, prompt_text: str, score: int) -> int:
-    \"\"\"
-    Sauvegarde un prompt dans la base de données.
-    
-    Args:
-        titre: Titre du prompt
-        categorie: Catégorie du prompt
-        prompt_text: Contenu du prompt
-        score: Score de qualité (0-100)
-    
-    Returns:
-        ID du prompt inséré
-    \"\"\"
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    INSERT INTO prompts (titre, categorie, prompt_text, score)
-    VALUES (?, ?, ?, ?)
-    ''', (titre, categorie, prompt_text, score))
-    
-    conn.commit()
-    prompt_id = cursor.lastrowid
-    conn.close()
-    
-    return prompt_id
+    \"\"\"Sauvegarde un prompt dans la base de données.\"\"\"
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+            INSERT INTO prompts (titre, categorie, prompt_text, score)
+            VALUES (?, ?, ?, ?)
+            ''', (titre, categorie, prompt_text, score))
+            prompt_id = cursor.lastrowid
+        logger.info(f"Prompt saved with ID {prompt_id}")
+        return prompt_id
+    except Exception as e:
+        logger.error(f"Error saving prompt: {e}")
+        raise
 
 
-def get_all_prompts() -> List[Dict[str, Any]]:
-    \"\"\"Récupère tous les prompts stockés dans la base de données.\"\"\"
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT id, titre, categorie, prompt_text, score FROM prompts ORDER BY id DESC')
-    rows = cursor.fetchall()
-    conn.close()
-    
-    return [dict(row) for row in rows]
+def get_all_prompts(limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    try:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                'SELECT id, titre, categorie, prompt_text, score FROM prompts ORDER BY id DESC LIMIT ? OFFSET ?',
+                (limit, offset)
+            ).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Error fetching prompts: {e}")
+        raise
+
+
+def count_prompts() -> int:
+    try:
+        with get_db_connection() as conn:
+            total = conn.execute('SELECT COUNT(*) FROM prompts').fetchone()[0]
+        return total
+    except Exception as e:
+        logger.error(f"Error counting prompts: {e}")
+        raise
+
+
+def search_prompts(query: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    try:
+        with get_db_connection() as conn:
+            pattern = f'%{query}%'
+            rows = conn.execute(
+                'SELECT id, titre, categorie, prompt_text, score FROM prompts WHERE titre LIKE ? OR prompt_text LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?',
+                (pattern, pattern, limit, offset)
+            ).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Error searching prompts: {e}")
+        raise
+
+
+def count_search_prompts(query: str) -> int:
+    try:
+        with get_db_connection() as conn:
+            pattern = f'%{query}%'
+            total = conn.execute(
+                'SELECT COUNT(*) FROM prompts WHERE titre LIKE ? OR prompt_text LIKE ?',
+                (pattern, pattern)
+            ).fetchone()[0]
+        return total
+    except Exception as e:
+        logger.error(f"Error counting search results: {e}")
+        raise
 
 
 def get_prompt_by_id(prompt_id: int) -> Optional[Dict[str, Any]]:
     \"\"\"Récupère un prompt spécifique par son ID.\"\"\"
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT id, titre, categorie, prompt_text, score FROM prompts WHERE id = ?', (prompt_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    return dict(row) if row else None
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, titre, categorie, prompt_text, score FROM prompts WHERE id = ?', (prompt_id,))
+            row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Error fetching prompt {prompt_id}: {e}")
+        raise
 
 
 def delete_prompt(prompt_id: int) -> bool:
     \"\"\"Supprime un prompt de la base de données.\"\"\"
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('DELETE FROM prompts WHERE id = ?', (prompt_id,))
-    conn.commit()
-    success = cursor.rowcount > 0
-    conn.close()
-    
-    return success
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM prompts WHERE id = ?', (prompt_id,))
+            success = cursor.rowcount > 0
+        logger.info(f"Prompt {prompt_id} deleted: {success}")
+        return success
+    except Exception as e:
+        logger.error(f"Error deleting prompt {prompt_id}: {e}")
+        raise
 """
 
 database_path = backend_dir / "database.py"
@@ -135,18 +316,20 @@ with open(database_path, "w", encoding="utf-8") as f:
 print(f"✓ Créé: {database_path}")
 
 # ============================================================================
-# 3. backend/optimizer.py
+# 5. backend/optimizer.py
 # ============================================================================
-optimizer_content = """import requests
+optimizer_content = """\"\"\"Prompt optimization utilities.\"\"\"
+import requests
 from typing import Optional
+from .logger import logger
 
 
 def calculate_quality_score(prompt_text: str) -> int:
     \"\"\"
     Calcule un score de qualité (0-100) basé sur les mots-clés présents.
     
-    Mots-clés recherchés: "Rôle", "Contexte", "Format"
-    - Chaque mot-clé présent ajoute 30 points
+    Mots-clés recherchés: "Rôle", "Contexte", "Format", "Mission"
+    - Chaque mot-clé présent ajoute 20 points
     - Longueur du prompt: +10 points si > 50 caractères
     
     Args:
@@ -155,58 +338,26 @@ def calculate_quality_score(prompt_text: str) -> int:
     Returns:
         Score entre 0 et 100
     \"\"\"
-    keywords = ["rôle", "contexte", "format"]
-    prompt_lower = prompt_text.lower()
-    
-    score = 0
-    for keyword in keywords:
-        if keyword in prompt_lower:
-            score += 30
-    
-    # Bonus pour la longueur
-    if len(prompt_text) > 50:
-        score += 10
-    
-    # Limiter à 100
-    return min(score, 100)
-
-
-def call_hugging_face_api(prompt_text: str, api_key: Optional[str] = None) -> dict:
-    \"\"\"
-    Appelle l'API Hugging Face pour générer/améliorer un prompt.
-    
-    Args:
-        prompt_text: Le prompt initial
-        api_key: Clé API Hugging Face (optionnelle, à mettre en variable d'env)
-    
-    Returns:
-        Dictionnaire avec la réponse de l'API
-    \"\"\"
-    # À implémenter avec votre clé API réelle
-    # Exemple simplifié qui retourne une structure de test
-    
-    if not api_key:
-        # Retourner une réponse de test
-        return {
-            "generated_prompt": f"Version optimisée du prompt: {prompt_text}",
-            "status": "test_mode"
-        }
-    
     try:
-        headers = {"Authorization": f"Bearer {api_key}"}
-        # Remplacer avec l'endpoint réel de Hugging Face
-        response = requests.post(
-            "https://api-inference.huggingface.co/models/...",
-            headers=headers,
-            json={"inputs": prompt_text},
-            timeout=10
-        )
-        return response.json()
+        keywords = ["rôle", "contexte", "format", "mission", "consignes"]
+        prompt_lower = prompt_text.lower()
+        
+        score = 0
+        for keyword in keywords:
+            if keyword in prompt_lower:
+                score += 20
+        
+        # Bonus pour la longueur
+        if len(prompt_text) > 50:
+            score += 10
+        
+        # Limiter à 100
+        final_score = min(score, 100)
+        logger.debug(f"Quality score calculated: {final_score}")
+        return final_score
     except Exception as e:
-        return {
-            "error": str(e),
-            "status": "failed"
-        }
+        logger.error(f"Error calculating quality score: {e}")
+        raise
 
 
 def optimize_prompt(prompt_text: str) -> dict:
@@ -219,25 +370,36 @@ def optimize_prompt(prompt_text: str) -> dict:
     Returns:
         Dictionnaire avec le score et le prompt optimisé
     \"\"\"
-    score = calculate_quality_score(prompt_text)
-    
-    # Logique simple d'optimisation
-    optimized = prompt_text
-    missing_keywords = []
-    
-    if "rôle" not in prompt_text.lower():
-        missing_keywords.append("Rôle")
-    if "contexte" not in prompt_text.lower():
-        missing_keywords.append("Contexte")
-    if "format" not in prompt_text.lower():
-        missing_keywords.append("Format")
-    
-    return {
-        "original_prompt": prompt_text,
-        "optimized_prompt": optimized,
-        "score": score,
-        "missing_keywords": missing_keywords
-    }
+    try:
+        if not prompt_text or not prompt_text.strip():
+            raise ValueError("Prompt text cannot be empty")
+        
+        score = calculate_quality_score(prompt_text)
+        
+        optimized = prompt_text
+        missing_keywords = []
+        
+        if "rôle" not in prompt_text.lower():
+            missing_keywords.append("Rôle")
+        if "contexte" not in prompt_text.lower():
+            missing_keywords.append("Contexte")
+        if "format" not in prompt_text.lower():
+            missing_keywords.append("Format")
+        
+        logger.info(f"Prompt optimization complete - Score: {score}, Missing: {len(missing_keywords)}")
+        
+        return {
+            "original_prompt": prompt_text,
+            "optimized_prompt": optimized,
+            "score": score,
+            "missing_keywords": missing_keywords
+        }
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error optimizing prompt: {e}")
+        raise
 """
 
 optimizer_path = backend_dir / "optimizer.py"
@@ -246,11 +408,12 @@ with open(optimizer_path, "w", encoding="utf-8") as f:
 print(f"✓ Créé: {optimizer_path}")
 
 # ============================================================================
-# 4. backend/main.py
+# 6. backend/main.py
 # ============================================================================
-main_content = """from fastapi import FastAPI, HTTPException
+main_content = """\"\"\"FastAPI main application.\"\"\"
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 from typing import List, Dict, Any
 import sys
 from pathlib import Path
@@ -258,8 +421,10 @@ from pathlib import Path
 # Ajouter le répertoire backend au path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from database import init_db, save_prompt, get_all_prompts, get_prompt_by_id, delete_prompt
+from database import init_db, save_prompt, get_all_prompts, get_prompt_by_id, delete_prompt, count_prompts, search_prompts, count_search_prompts
 from optimizer import calculate_quality_score, optimize_prompt
+from config import config
+from logger import logger
 
 # Initialiser l'app FastAPI
 app = FastAPI(
@@ -268,45 +433,66 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuration CORS pour Streamlit
+# Configuration CORS - Secure with allowed origins only
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permet toutes les origines
+    allow_origins=[origin.strip() for origin in config.ALLOWED_ORIGINS],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # Initialiser la base de données au démarrage
-init_db()
+try:
+    init_db()
+    logger.info("Application started successfully")
+except Exception as e:
+    logger.error(f"Failed to start application: {e}")
+    raise
 
 
 # ============================================================================
-# Modèles Pydantic
+# Modèles Pydantic avec validation
 # ============================================================================
 class PromptRequest(BaseModel):
-    role: str
-    task: str
-    context: str
-    tone: str
+    expertise: str = Field(..., min_length=1, max_length=100)
+    mission: str = Field(..., min_length=1, max_length=1000)
+    tone: str = Field(...)
+    output_format: str = Field(default="Texte", max_length=50)
+    length: str = Field(default="Moyenne")
+
+    @validator('expertise', 'mission', 'tone', 'output_format', 'length')
+    def strip_whitespace(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @validator('tone')
+    def validate_tone(cls, v):
+        valid_tones = ["Très formel", "Formel", "Neutre", "Décontracté", "Très décontracté"]
+        if v not in valid_tones:
+            raise ValueError(f"Ton invalide")
+        return v
+
+    @validator('length')
+    def validate_length(cls, v):
+        valid_lengths = ["Courte", "Moyenne", "Longue"]
+        if v not in valid_lengths:
+            raise ValueError(f"Longueur invalide")
+        return v
+
+
+LENGTH_WORDS = {"Courte": 100, "Moyenne": 300, "Longue": 500}
 
 
 class PromptResponse(BaseModel):
-    titre: str
-    prompt_text: str
-    score: int
+    titre: str = Field(..., max_length=200)
+    prompt_text: str = Field(..., max_length=5000)
+    score: int = Field(..., ge=0, le=100)
 
 
 class PromptOptimize(BaseModel):
-    prompt_text: str
-
-
-class PromptStored(BaseModel):
-    id: int
-    titre: str
-    categorie: str
-    prompt_text: str
-    score: int
+    prompt_text: str = Field(..., min_length=1, max_length=5000)
 
 
 # ============================================================================
@@ -314,120 +500,177 @@ class PromptStored(BaseModel):
 # ============================================================================
 @app.get("/")
 async def root():
-    \"\"\"Endpoint racine pour tester l'API.\"\"\"
-    return {"message": "Bienvenue sur l'API Générateur de Prompts"}
+    \"\"\"Endpoint racine.\"\"\"
+    logger.info("Root endpoint accessed")
+    return {"message": "Bienvenue sur l'API Générateur de Prompts", "version": "1.0.0"}
 
 
 @app.post("/generate")
 async def generate_prompt(request: PromptRequest) -> Dict[str, Any]:
-    \"\"\"
-    Génère un prompt basé sur les paramètres fournis.
-    
-    Args:
-        role: Le rôle/personnalité du prompt
-        task: La tâche à accomplir
-        context: Le contexte de la tâche
-        tone: Le ton souhaité
-    
-    Returns:
-        Prompt généré avec son score de qualité
-    \"\"\"
+    \"\"\"Génère un prompt basé sur les paramètres fournis.\"\"\"
     try:
-        # Construire le prompt
-        prompt_text = f'Rôle: {request.role}\\nTâche: {request.task}\\nContexte: {request.context}\\nTon: {request.tone}'
+        logger.info(f"Generating prompt for mission: {request.mission[:50]}")
         
-        # Calculer le score
+        word_count = LENGTH_WORDS.get(request.length, 300)
+        prompt_text = f'''Tu es un expert en {request.expertise}.
+
+📋 Mission :
+{request.mission}
+
+🎯 Consignes :
+- Adopte un ton {request.tone.lower()}
+- Réponds au format : {request.output_format}
+- Longueur : {request.length} (~{word_count} mots)
+- Sois précis, structuré et pertinent
+- Adapte ta réponse à la mission confiée
+
+📝 Réponse :'''
+
         score = calculate_quality_score(prompt_text)
+        logger.info(f"Prompt generated with score: {score}")
         
         return {
-            "titre": f"Prompt - {request.task[:30]}",
+            "titre": f"Prompt - {request.mission[:30]}",
             "prompt_text": prompt_text,
             "score": score
         }
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Error generating prompt: {e}")
+        raise HTTPException(status_code=500, detail="Erreur lors de la génération")
 
 
 @app.post("/optimize")
 async def optimize(request: PromptOptimize) -> Dict[str, Any]:
-    \"\"\"
-    Optimise un prompt existant.
-    
-    Args:
-        prompt_text: Le prompt à optimiser
-    
-    Returns:
-        Prompt optimisé avec score et recommandations
-    \"\"\"
+    \"\"\"Optimise un prompt existant.\"\"\"
     try:
+        logger.info("Optimizing prompt")
         result = optimize_prompt(request.prompt_text)
+        logger.info(f"Optimization complete - score: {result.get('score')}")
         return result
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Error optimizing prompt: {e}")
+        raise HTTPException(status_code=500, detail="Erreur lors de l'optimisation")
 
 
 @app.get("/prompts")
-async def list_prompts() -> Dict[str, Any]:
-    \"\"\"Récupère la liste de tous les prompts stockés.\"\"\"
+async def list_prompts(limit: int = 50, offset: int = 0) -> Dict[str, Any]:
     try:
-        prompts = get_all_prompts()
-        return {
-            "total": len(prompts),
-            "prompts": prompts
-        }
+        logger.info(f"Listing prompts - limit: {limit}, offset: {offset}")
+        
+        if limit < 1 or limit > 100:
+            raise ValueError("Limit must be between 1 and 100")
+        if offset < 0:
+            raise ValueError("Offset must be >= 0")
+        
+        prompts = get_all_prompts(limit=limit, offset=offset)
+        total = count_prompts()
+        
+        return {"total": total, "limit": limit, "offset": offset, "prompts": prompts}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error listing prompts: {e}")
+        raise HTTPException(status_code=500, detail="Erreur lors du chargement")
+
+
+@app.get("/prompts/search")
+async def search_prompts_route(q: str = "", limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+    try:
+        logger.info(f"Searching prompts - query: {q[:50]}")
+        
+        if limit < 1 or limit > 100:
+            raise ValueError("Limit must be between 1 and 100")
+        if offset < 0:
+            raise ValueError("Offset must be >= 0")
+        
+        if not q or not q.strip():
+            return await list_prompts(limit=limit, offset=offset)
+        
+        prompts = search_prompts(query=q.strip(), limit=limit, offset=offset)
+        total = count_search_prompts(query=q.strip())
+        
+        return {"total": total, "limit": limit, "offset": offset, "prompts": prompts}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error searching: {e}")
+        raise HTTPException(status_code=500, detail="Erreur de recherche")
 
 
 @app.get("/prompts/{prompt_id}")
 async def get_prompt(prompt_id: int) -> Dict[str, Any]:
-    \"\"\"Récupère un prompt spécifique par ID.\"\"\"
+    \"\"\"Récupère un prompt par ID.\"\"\"
     try:
+        logger.info(f"Fetching prompt ID: {prompt_id}")
+        
+        if prompt_id < 1:
+            raise ValueError("ID must be >= 1")
+        
         prompt = get_prompt_by_id(prompt_id)
         if not prompt:
             raise HTTPException(status_code=404, detail="Prompt non trouvé")
+        
         return prompt
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching prompt: {e}")
+        raise HTTPException(status_code=500, detail="Erreur")
 
 
 @app.post("/prompts/save")
 async def save_new_prompt(request: PromptResponse) -> Dict[str, Any]:
-    \"\"\"Sauvegarde un nouveau prompt dans la base de données.\"\"\"
+    \"\"\"Sauvegarde un prompt.\"\"\"
     try:
+        logger.info(f"Saving prompt: {request.titre[:50]}")
+        
         prompt_id = save_prompt(
             titre=request.titre,
             categorie="général",
             prompt_text=request.prompt_text,
             score=request.score
         )
-        return {
-            "id": prompt_id,
-            "message": "Prompt sauvegardé avec succès"
-        }
+        
+        logger.info(f"Prompt saved with ID: {prompt_id}")
+        return {"id": prompt_id, "message": "Prompt sauvegardé"}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error saving: {e}")
+        raise HTTPException(status_code=500, detail="Erreur")
 
 
 @app.delete("/prompts/{prompt_id}")
 async def delete_prompt_route(prompt_id: int) -> Dict[str, Any]:
-    \"\"\"Supprime un prompt de la base de données.\"\"\"
+    \"\"\"Supprime un prompt.\"\"\"
     try:
+        logger.info(f"Deleting prompt ID: {prompt_id}")
+        
+        if prompt_id < 1:
+            raise ValueError("ID must be >= 1")
+        
         success = delete_prompt(prompt_id)
         if not success:
+            logger.warning(f"Prompt not found: {prompt_id}")
             raise HTTPException(status_code=404, detail="Prompt non trouvé")
-        return {"message": "Prompt supprimé avec succès"}
+        
+        logger.info(f"Prompt deleted: {prompt_id}")
+        return {"message": "Prompt supprimé"}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        logger.error(f"Error deleting: {e}")
+        raise HTTPException(status_code=500, detail="Erreur")
 """
 
 main_path = backend_dir / "main.py"
@@ -436,13 +679,25 @@ with open(main_path, "w", encoding="utf-8") as f:
 print(f"✓ Créé: {main_path}")
 
 # ============================================================================
-# 5. frontend/app.py
+# 7. frontend/app.py
 # ============================================================================
-frontend_content = """import streamlit as st
+frontend_content = """\"\"\"Streamlit frontend application.\"\"\"
+import streamlit as st
 import requests
 from typing import List, Dict, Any
+import pyperclip
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-# Configuration de la page
+# Load environment variables
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+else:
+    load_dotenv(Path(__file__).parent.parent / ".env.example")
+
+# Configuration
 st.set_page_config(
     page_title="Générateur de Prompts",
     page_icon="✨",
@@ -450,261 +705,188 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# URL de l'API
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
-# ============================================================================
-# Fonctions utilitaires
-# ============================================================================
-@st.cache_resource
-def get_session_state():
-    \"\"\"Initialise les variables de session.\"\"\"
-    if 'generated_prompt' not in st.session_state:
-        st.session_state.generated_prompt = None
-    if 'quality_score' not in st.session_state:
-        st.session_state.quality_score = None
-    return st.session_state
-
-
-def fetch_prompts() -> List[Dict[str, Any]]:
-    \"\"\"Récupère tous les prompts depuis l'API.\"\"\"
+def is_api_available() -> bool:
     try:
-        response = requests.get(f"{API_BASE_URL}/prompts", timeout=5)
+        response = requests.get(f"{API_BASE_URL}/", timeout=2)
+        return response.status_code == 200
+    except:
+        return False
+
+
+def copy_to_clipboard(text: str):
+    try:
+        pyperclip.copy(text)
+        st.toast("✅ Copié!", icon="📋")
+    except Exception as e:
+        st.error(f"❌ Erreur: {e}")
+
+
+# Session state
+if 'generated_prompt' not in st.session_state:
+    st.session_state.generated_prompt = None
+if 'quality_score' not in st.session_state:
+    st.session_state.quality_score = None
+if 'prompts_offset' not in st.session_state:
+    st.session_state.prompts_offset = 0
+if 'search_query' not in st.session_state:
+    st.session_state.search_query = ""
+
+
+def fetch_prompts(limit: int = 5, offset: int = 0) -> tuple:
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/prompts",
+            params={"limit": limit, "offset": offset},
+            timeout=5
+        )
         if response.status_code == 200:
             data = response.json()
-            return data.get("prompts", [])
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erreur de connexion à l'API: {e}")
-    return []
+            return data.get("prompts", []), data.get("total", 0), limit, offset
+    except:
+        st.error("❌ Erreur de connexion à l'API")
+    return [], 0, limit, offset
 
 
-def generate_prompt(role: str, task: str, context: str, tone: str) -> Dict[str, Any]:
-    \"\"\"Génère un nouveau prompt via l'API.\"\"\"
+def generate_prompt(expertise: str, mission: str, tone: str, output_format: str, length: str):
     try:
-        payload = {
-            "role": role,
-            "task": task,
-            "context": context,
-            "tone": tone
-        }
         response = requests.post(
             f"{API_BASE_URL}/generate",
-            json=payload,
+            json={"expertise": expertise, "mission": mission, "tone": tone, "output_format": output_format, "length": length},
             timeout=10
         )
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Erreur API: {response.status_code}")
-            return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erreur de connexion: {e}")
-        return None
+            st.error(f"❌ Erreur: {response.status_code}")
+    except:
+        st.error("❌ Erreur de connexion")
+    return None
 
 
-def optimize_prompt(prompt_text: str) -> Dict[str, Any]:
-    \"\"\"Optimise un prompt via l'API.\"\"\"
+def optimize_prompt(prompt_text: str):
     try:
-        payload = {"prompt_text": prompt_text}
         response = requests.post(
             f"{API_BASE_URL}/optimize",
-            json=payload,
+            json={"prompt_text": prompt_text},
             timeout=10
         )
         if response.status_code == 200:
             return response.json()
-        else:
-            st.error(f"Erreur API: {response.status_code}")
-            return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erreur de connexion: {e}")
-        return None
+    except:
+        st.error("❌ Erreur")
+    return None
 
 
 def save_prompt_to_db(titre: str, prompt_text: str, score: int) -> bool:
-    \"\"\"Sauvegarde un prompt dans la base de données.\"\"\"
     try:
-        payload = {
-            "titre": titre,
-            "prompt_text": prompt_text,
-            "score": score
-        }
         response = requests.post(
             f"{API_BASE_URL}/prompts/save",
-            json=payload,
+            json={"titre": titre, "prompt_text": prompt_text, "score": score},
             timeout=10
         )
         if response.status_code == 200:
-            st.success("Prompt sauvegardé avec succès! ✓")
+            st.success("✅ Sauvegardé!")
             return True
-        else:
-            st.error(f"Erreur lors de la sauvegarde: {response.status_code}")
-            return False
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erreur de connexion: {e}")
-        return False
+    except:
+        st.error("❌ Erreur")
+    return False
 
 
 def delete_prompt_from_db(prompt_id: int) -> bool:
-    \"\"\"Supprime un prompt de la base de données.\"\"\"
     try:
-        response = requests.delete(
-            f"{API_BASE_URL}/prompts/{prompt_id}",
-            timeout=10
-        )
-        if response.status_code == 200:
-            return True
-        return False
-    except requests.exceptions.RequestException:
+        response = requests.delete(f"{API_BASE_URL}/prompts/{prompt_id}", timeout=10)
+        return response.status_code == 200
+    except:
         return False
 
 
-# ============================================================================
-# Interface principale
-# ============================================================================
+# Main UI
 st.title("✨ Générateur et Optimiseur de Prompts")
-st.markdown("Créez et optimisez des prompts de qualité pour vos modèles IA")
+st.markdown("Créez et optimisez des prompts pour vos modèles IA")
 
-session = get_session_state()
+if not is_api_available():
+    st.error("❌ Impossible de se connecter à l'API")
+    st.stop()
 
-# Créer deux colonnes
 col_form, col_result = st.columns([1, 1], gap="medium")
 
-# ============================================================================
-# Colonne gauche: Formulaire
-# ============================================================================
 with col_form:
     st.subheader("📝 Formulaire")
+    expertise = st.text_input("Expertise", placeholder="ex: Marketing")
+    mission = st.text_area("Mission", placeholder="Décrivez la tâche", height=100)
+    output_format = st.selectbox("Format", ["Texte", "Liste", "Tableau", "Code"])
+    tone = st.select_slider("Ton", ["Très formel", "Formel", "Neutre", "Décontracté", "Très décontracté"], value="Neutre")
+    length = st.select_slider("Longueur", ["Courte", "Moyenne", "Longue"], value="Moyenne")
     
-    role = st.text_input(
-        "Rôle",
-        placeholder="ex: Assistant de rédaction",
-        help="Quel rôle doit adopter le modèle?"
-    )
-    
-    task = st.text_input(
-        "Tâche",
-        placeholder="ex: Résumer un article",
-        help="Quelle est la tâche principale?"
-    )
-    
-    context = st.text_area(
-        "Contexte",
-        placeholder="ex: Articles de blog, domaine technique...",
-        height=100,
-        help="Fournissez le contexte pour une meilleure génération"
-    )
-    
-    tone = st.select_slider(
-        "Ton",
-        options=["Très formel", "Formel", "Neutre", "Décontracté", "Très décontracté"],
-        value="Neutre"
-    )
-    
-    st.markdown("---")
-    
-    # Boutons
     col_btn1, col_btn2 = st.columns(2)
-    
     with col_btn1:
         if st.button("🚀 Générer", use_container_width=True, type="primary"):
-            if role and task and context:
-                with st.spinner("Génération en cours..."):
-                    result = generate_prompt(role, task, context, tone)
-                    if result:
-                        session.generated_prompt = result.get("prompt_text")
-                        session.quality_score = result.get("score")
-                        st.success("Prompt généré! ✓")
-            else:
-                st.warning("Veuillez remplir tous les champs")
-    
+            if expertise and mission:
+                result = generate_prompt(expertise, mission, tone, output_format, length)
+                if result:
+                    st.session_state.generated_prompt = result.get("prompt_text")
+                    st.session_state.quality_score = result.get("score")
+                    st.success("✅ Généré!")
     with col_btn2:
         if st.button("🔧 Optimiser", use_container_width=True):
-            if session.generated_prompt:
-                with st.spinner("Optimisation en cours..."):
-                    result = optimize_prompt(session.generated_prompt)
-                    if result:
-                        st.info(f"Score initial: {session.quality_score}")
-                        if result.get("missing_keywords"):
-                            st.warning(f"Mots-clés manquants: {', '.join(result['missing_keywords'])}")
-            else:
-                st.warning("Générez d'abord un prompt")
+            if st.session_state.generated_prompt:
+                result = optimize_prompt(st.session_state.generated_prompt)
+                if result:
+                    st.info(f"Score: {result.get('score')}/100")
 
-
-# ============================================================================
-# Colonne droite: Résultat
-# ============================================================================
 with col_result:
     st.subheader("📊 Résultat")
-    
-    if session.generated_prompt:
-        # Affichage du prompt
-        st.markdown("### Prompt généré")
-        st.code(session.generated_prompt, language="text")
+    if st.session_state.generated_prompt:
+        st.code(st.session_state.generated_prompt)
+        if st.session_state.quality_score is not None:
+            st.progress(min(st.session_state.quality_score / 100, 1.0))
+            st.metric("Score", f"{st.session_state.quality_score}/100")
         
-        # Barre de score
-        if session.quality_score is not None:
-            st.markdown("### Score de qualité")
-            st.progress(session.quality_score / 100)
-            st.metric("Score", f"{session.quality_score}/100")
-        
-        # Bouton pour sauvegarder
-        col_save1, col_save2 = st.columns(2)
-        with col_save1:
-            titre_save = st.text_input("Titre du prompt", value=f"Prompt {task[:20]}")
-        with col_save2:
+        col1, col2 = st.columns(2)
+        with col1:
+            titre = st.text_input("Titre", value=f"Prompt {mission[:20]}")
+        with col2:
             if st.button("💾 Sauvegarder", use_container_width=True):
-                if titre_save:
-                    save_prompt_to_db(titre_save, session.generated_prompt, session.quality_score)
+                if titre:
+                    save_prompt_to_db(titre, st.session_state.generated_prompt, st.session_state.quality_score)
     else:
-        st.info("👈 Remplissez le formulaire et générez un prompt")
+        st.info("👈 Générez un prompt")
 
-
-# ============================================================================
-# Barre latérale: Historique
-# ============================================================================
 with st.sidebar:
     st.subheader("📚 Historique")
-    st.markdown("Tous les prompts stockés")
+    search_query = st.text_input("🔍 Rechercher")
+    if search_query != st.session_state.search_query:
+        st.session_state.search_query = search_query
+        st.session_state.prompts_offset = 0
     
-    prompts = fetch_prompts()
+    prompts, total, limit, offset = fetch_prompts(5, st.session_state.prompts_offset)
+    st.markdown(f"*{total} prompt(s)*")
     
     if prompts:
-        for idx, prompt in enumerate(prompts):
-            with st.expander(
-                f"📌 {prompt['titre']} (Score: {prompt['score']}/100)",
-                expanded=False
-            ):
-                st.write(f"**Catégorie:** {prompt['categorie']}")
-                st.write(f"**Score:** {prompt['score']}/100")
-                st.text_area("Prompt", value=prompt['prompt_text'], height=100, disabled=True)
-                
+        for prompt in prompts:
+            with st.expander(f"📌 {prompt['titre']} ({prompt['score']}/100)"):
+                st.text_area("", value=prompt['prompt_text'], height=80, disabled=True, key=f"ta_{prompt['id']}")
                 col_copy, col_del = st.columns(2)
                 with col_copy:
-                    if st.button("📋 Copier", key=f"copy_{prompt['id']}"):
-                        st.write("Prompt copié!")
-                
+                    if st.button("📋 Copier", key=f"copy_{prompt['id']}", use_container_width=True):
+                        copy_to_clipboard(prompt['prompt_text'])
                 with col_del:
-                    if st.button("🗑️ Supprimer", key=f"delete_{prompt['id']}"):
+                    if st.button("🗑️ Supprimer", key=f"delete_{prompt['id']}", use_container_width=True):
                         if delete_prompt_from_db(prompt['id']):
-                            st.success("Supprimé!")
                             st.rerun()
-    else:
-        st.info("Aucun prompt sauvegardé")
-    
-    st.markdown("---")
-    st.markdown("*Générateur de Prompts v1.0*")
-
-
-# ============================================================================
-# Footer
-# ============================================================================
-st.markdown("---")
-st.markdown(
-    "<div style='text-align: center'><small>Alimenté par FastAPI et Streamlit</small></div>",
-    unsafe_allow_html=True
-)
+        
+        col_prev, col_next = st.columns(2)
+        with col_prev:
+            if offset > 0 and st.button("⬅️ Précédent", use_container_width=True):
+                st.session_state.prompts_offset = max(0, offset - limit)
+                st.rerun()
+        with col_next:
+            if offset + limit < total and st.button("Suivant ➡️", use_container_width=True):
+                st.session_state.prompts_offset = offset + limit
+                st.rerun()
 """
 
 frontend_path = frontend_dir / "app.py"
@@ -712,8 +894,10 @@ with open(frontend_path, "w", encoding="utf-8") as f:
     f.write(frontend_content)
 print(f"✓ Créé: {frontend_path}")
 
+print(f"✓ Créé: {frontend_path}")
+
 # ============================================================================
-# 6. Créer un fichier __init__.py pour le package backend
+# 8. Créer un fichier __init__.py pour le package backend
 # ============================================================================
 init_path = backend_dir / "__init__.py"
 with open(init_path, "w", encoding="utf-8") as f:
@@ -721,7 +905,7 @@ with open(init_path, "w", encoding="utf-8") as f:
 print(f"✓ Créé: {init_path}")
 
 # ============================================================================
-# 7. Créer un fichier README.md
+# 9. Créer un fichier README.md
 # ============================================================================
 readme_content = """# Générateur de Prompts
 
@@ -740,77 +924,144 @@ Une application complète pour générer et optimiser des prompts pour modèles 
 pip install -r requirements.txt
 ```
 
+2. Créer le fichier .env (copier de .env.example):
+```bash
+cp .env.example .env
+```
+
 ## Démarrage
 
-### 1. Démarrer le backend
+### Option 1: Démarrer avec le script run.py
 ```bash
-python backend/main.py
+python run.py
 ```
 
-Ou avec uvicorn:
+### Option 2: Démarrer manuellement
+
+Terminal 1 - Backend:
 ```bash
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-L'API sera disponible à: http://localhost:8000
-
-### 2. Démarrer le frontend (dans un autre terminal)
+Terminal 2 - Frontend:
 ```bash
 streamlit run frontend/app.py
 ```
 
+L'API sera disponible à: http://localhost:8000
 L'interface Streamlit sera disponible à: http://localhost:8501
+
+## Tester l'API
+
+Accédez à la documentation interactive: http://localhost:8000/docs
+
+## Exécuter les tests
+
+```bash
+python run_tests.py
+```
+
+ou
+
+```bash
+pytest tests/
+```
 
 ## Fonctionnalités
 
 ### Génération de Prompts
 - Créez des prompts en fournissant:
-  - Rôle: Le rôle du modèle
-  - Tâche: La tâche à accomplir
-  - Contexte: Le contexte de la tâche
-  - Ton: Le ton souhaité
+  - Expertise: Domaine d'expertise
+  - Mission: Mission du prompt
+  - Ton: Ton souhaité
+  - Format: Format de sortie
+  - Longueur: Longueur du prompt
 
 ### Optimisation
 - Optimisez les prompts existants
-- Obtenez un score de qualité (0-100) basé sur:
-  - Présence de mots-clés: "Rôle", "Contexte", "Format"
-  - Longueur du prompt
+- Obtenez un score de qualité (0-100)
 
 ### Historique
 - Consultez tous les prompts sauvegardés
+- Recherchez parmi les prompts
 - Supprimez les prompts indésirables
 
 ## Structure du projet
 
 ```
 Projet_Generateur_Prompts/
-├── setup_project.py           # Script de configuration
-├── requirements.txt           # Dépendances Python
-├── prompts.db                # Base de données SQLite (créée à la première exécution)
+├── .env.example              # Configuration template
+├── requirements.txt          # Dépendances Python
+├── run.py                    # Script de démarrage
+├── run_tests.py              # Script de test
+├── IMPROVEMENTS.md           # Améliorations du code
+├── README.md                 # Cette documentation
 ├── backend/
 │   ├── __init__.py
-│   ├── main.py              # API FastAPI
-│   ├── database.py          # Gestion SQLite
-│   └── optimizer.py         # Logique d'optimisation
-└── frontend/
-    └── app.py               # Interface Streamlit
+│   ├── config.py             # Configuration
+│   ├── logger.py             # Logging
+│   ├── main.py               # API FastAPI
+│   ├── database.py           # Gestion SQLite
+│   └── optimizer.py          # Logique d'optimisation
+├── frontend/
+│   └── app.py                # Interface Streamlit
+├── tests/
+│   └── test_api.py           # Tests unitaires
+└── logs/
+    └── app.log               # Logs d'application
 ```
 
-## API Endpoints
+## Configuration
 
-- `GET /` - Endpoint racine
+Voir `.env.example` pour toutes les variables de configuration disponibles.
+
+## Documentation API
+
+### Endpoints principaux
+
+- `GET /` - Vérifier le statut de l'API
 - `POST /generate` - Générer un prompt
 - `POST /optimize` - Optimiser un prompt
-- `GET /prompts` - Récupérer tous les prompts
+- `GET /prompts` - Récupérer les prompts (avec pagination)
+- `GET /prompts/search` - Rechercher des prompts
 - `GET /prompts/{id}` - Récupérer un prompt spécifique
 - `POST /prompts/save` - Sauvegarder un prompt
 - `DELETE /prompts/{id}` - Supprimer un prompt
 
-## Notes
+## Améliorations du code
 
-- La base de données SQLite (`prompts.db`) sera créée automatiquement
-- Le CORS est configuré pour permettre les requêtes depuis Streamlit
-- En mode test, l'API Hugging Face retourne des résultats fictifs
+Le projet inclut plusieurs améliorations importantes:
+
+✅ Configuration management (config.py)
+✅ Logging system (logger.py)
+✅ Input validation avec Pydantic
+✅ Error handling avec HTTP codes appropriés
+✅ CORS security (restricted origins)
+✅ Database context managers
+✅ Comprehensive tests
+✅ Environment variable support
+✅ Better UI/UX
+
+Pour plus de détails, voir `IMPROVEMENTS.md`.
+
+## Troubleshooting
+
+### L'API n'est pas accessible
+
+1. Vérifiez que le serveur backend est en cours d'exécution
+2. Vérifiez que le port 8000 est disponible
+3. Vérifiez les logs dans `logs/app.log`
+
+### La base de données ne fonctionne pas
+
+1. Supprimez `prompts.db`
+2. Redémarrez l'application
+3. Le fichier sera recréé automatiquement
+
+### Les tests échouent
+
+1. Assurez-vous que pytest est installé: `pip install -r requirements.txt`
+2. Exécutez: `python -m pytest tests/ -v`
 """
 
 readme_path = PROJECT_ROOT / "README.md"
@@ -821,25 +1072,46 @@ print(f"✓ Créé: {readme_path}")
 # ============================================================================
 # Message final
 # ============================================================================
-print("\n" + "="*60)
-print("✅ PROJET CONFIGURÉ AVEC SUCCÈS!")
-print("="*60)
+print("\n" + "="*70)
+print("✅ PROJET CONFIGURÉ AVEC SUCCÈS - VERSION AMÉLIORÉE!")
+print("="*70)
 print(f"\nStructure créée dans: {PROJECT_ROOT}\n")
 print("Fichiers créés:")
+print(f"  ✓ .env.example")
 print(f"  ✓ requirements.txt")
 print(f"  ✓ backend/__init__.py")
-print(f"  ✓ backend/database.py")
-print(f"  ✓ backend/optimizer.py")
-print(f"  ✓ backend/main.py")
-print(f"  ✓ frontend/app.py")
-print(f"  ✓ README.md")
-print("\n" + "="*60)
+print(f"  ✓ backend/config.py             [NEW - Configuration]")
+print(f"  ✓ backend/logger.py             [NEW - Logging]")
+print(f"  ✓ backend/database.py           [IMPROVED - Context managers]")
+print(f"  ✓ backend/optimizer.py          [IMPROVED - Error handling]")
+print(f"  ✓ backend/main.py               [IMPROVED - Validation]")
+print(f"  ✓ frontend/app.py               [IMPROVED - Error handling]")
+print(f"  ✓ README.md                     [IMPROVED]")
+print("\n" + "="*70)
 print("PROCHAINES ÉTAPES:")
-print("="*60)
-print("\n1. Installer les dépendances:")
+print("="*70)
+print("\n1. Créer le fichier .env (copier de .env.example):")
+print("   cp .env.example .env\n")
+print("2. Installer les dépendances:")
 print("   pip install -r requirements.txt\n")
-print("2. Démarrer le backend (Terminal 1):")
-print("   python backend/main.py\n")
-print("3. Démarrer le frontend (Terminal 2):")
-print("   streamlit run frontend/app.py\n")
-print("="*60)
+print("3. Démarrer l'application:")
+print("   python run.py\n")
+print("4. Tester l'API:")
+print("   http://localhost:8000/docs\n")
+print("5. Accéder au frontend:")
+print("   http://localhost:8501\n")
+print("6. Exécuter les tests:")
+print("   python run_tests.py\n")
+print("="*70)
+print("AMÉLIORATIONS INCLUSES:")
+print("="*70)
+print("✨ Configuration management")
+print("✨ Logging system")
+print("✨ Input validation")
+print("✨ Error handling")
+print("✨ CORS security")
+print("✨ Database optimizations")
+print("✨ Comprehensive tests")
+print("✨ Better documentation")
+print("="*70 + "\n")
+

@@ -2,22 +2,33 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import logging
 
 DB_PATH = Path(__file__).parent.parent / "prompts.db"
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """Get database connection with timeout and proper error handling."""
     try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.row_factory = sqlite3.Row
         yield conn
         conn.commit()
-    except Exception:
-        conn.rollback()
+    except sqlite3.DatabaseError as e:
+        logger.error(f"Database error: {e}")
+        if 'conn' in locals():
+            conn.rollback()
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in database operation: {e}")
+        if 'conn' in locals():
+            conn.rollback()
         raise
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
 
 def init_db() -> None:

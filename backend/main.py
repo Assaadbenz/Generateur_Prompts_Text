@@ -4,12 +4,20 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any
 import sys
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Ajouter le répertoire backend au path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from database import init_db, save_prompt, get_all_prompts, get_prompt_by_id, delete_prompt, count_prompts, search_prompts, count_search_prompts
 from optimizer import calculate_quality_score, optimize_prompt
+
+# Get CORS origins from environment or use defaults
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:8501").split(",")
 
 # Initialiser l'app FastAPI
 app = FastAPI(
@@ -18,10 +26,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuration CORS pour Streamlit
+# Configuration CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8501"],
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -39,11 +47,20 @@ VALID_FORMATS = ["Texte", "Liste", "Tableau", "Code"]
 
 
 class PromptRequest(BaseModel):
-    expertise: str = Field(..., min_length=1, description="Domaine d'expertise")
-    mission: str = Field(..., min_length=1, description="Mission à accomplir")
+    expertise: str = Field(..., min_length=1, max_length=200, description="Domaine d'expertise")
+    mission: str = Field(..., min_length=1, max_length=2000, description="Mission à accomplir")
     tone: str = Field(..., description="Ton souhaité")
     output_format: str = Field(default="Texte", description="Format de sortie")
     length: str = Field(default="Moyenne", description="Longueur du prompt")
+    
+    def validate_inputs(self):
+        """Validate tone and format against allowed values."""
+        if self.tone not in VALID_TONES:
+            raise ValueError(f"Ton invalide. Valeurs acceptées: {VALID_TONES}")
+        if self.output_format not in VALID_FORMATS:
+            raise ValueError(f"Format invalide. Valeurs acceptées: {VALID_FORMATS}")
+        if self.length not in LENGTH_WORDS:
+            raise ValueError(f"Longueur invalide. Valeurs acceptées: {list(LENGTH_WORDS.keys())}")
 
 
 class PromptResponse(BaseModel):
@@ -65,6 +82,12 @@ async def root():
     return {"message": "Bienvenue sur l'API Générateur de Prompts"}
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify API is running."""
+    return {"status": "ok", "message": "API is running"}
+
+
 @app.post("/generate")
 async def generate_prompt(request: PromptRequest) -> Dict[str, Any]:
     """
@@ -81,6 +104,9 @@ async def generate_prompt(request: PromptRequest) -> Dict[str, Any]:
         Prompt généré avec son score de qualité
     """
     try:
+        # Validate input parameters
+        request.validate_inputs()
+        
         word_count = LENGTH_WORDS.get(request.length, 300)
         prompt_text = f"""Tu es un expert en {request.expertise}.
 
