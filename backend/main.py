@@ -1,10 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Dict, Any
 import sys
 from pathlib import Path
 import os
+import json
+import io
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -215,6 +218,100 @@ async def delete_prompt_route(prompt_id: int) -> Dict[str, Any]:
         if not success:
             raise HTTPException(status_code=404, detail="Prompt non trouvé")
         return {"message": "Prompt supprimé avec succès"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Export Endpoints
+# ============================================================================
+@app.get("/export/json")
+async def export_json(prompt_id: int = None) -> StreamingResponse:
+    """
+    Exporte les prompts en JSON.
+    
+    Args:
+        prompt_id: ID d'un prompt spécifique (optionnel). Si vide, exporte tous les prompts.
+    
+    Returns:
+        Fichier JSON téléchargeable
+    """
+    try:
+        if prompt_id:
+            # Export d'un prompt spécifique
+            prompt = get_prompt_by_id(prompt_id)
+            if not prompt:
+                raise HTTPException(status_code=404, detail="Prompt non trouvé")
+            data = [prompt]
+            filename = f"prompt_{prompt_id}.json"
+        else:
+            # Export de tous les prompts
+            data = get_all_prompts(limit=10000, offset=0)
+            filename = "prompts_export.json"
+        
+        # Créer le contenu JSON
+        json_data = json.dumps(data, ensure_ascii=False, indent=2)
+        
+        # Retourner comme fichier téléchargeable
+        return StreamingResponse(
+            io.BytesIO(json_data.encode('utf-8')),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/export/markdown")
+async def export_markdown(prompt_id: int = None) -> StreamingResponse:
+    """
+    Exporte les prompts en Markdown.
+    
+    Args:
+        prompt_id: ID d'un prompt spécifique (optionnel). Si vide, exporte tous les prompts.
+    
+    Returns:
+        Fichier Markdown téléchargeable
+    """
+    try:
+        if prompt_id:
+            # Export d'un prompt spécifique
+            prompt = get_prompt_by_id(prompt_id)
+            if not prompt:
+                raise HTTPException(status_code=404, detail="Prompt non trouvé")
+            data = [prompt]
+            filename = f"prompt_{prompt_id}.md"
+        else:
+            # Export de tous les prompts
+            data = get_all_prompts(limit=10000, offset=0)
+            filename = "prompts_export.md"
+        
+        # Créer le contenu Markdown
+        markdown_content = "# Prompts Export\n\n"
+        markdown_content += f"📅 Export Date: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        markdown_content += f"📊 Total Prompts: {len(data)}\n\n"
+        markdown_content += "---\n\n"
+        
+        for i, prompt in enumerate(data, 1):
+            markdown_content += f"## {i}. {prompt.get('titre', 'Sans titre')}\n\n"
+            markdown_content += f"**ID:** {prompt.get('id')}\n\n"
+            markdown_content += f"**Catégorie:** {prompt.get('categorie', 'N/A')}\n\n"
+            markdown_content += f"**Score:** {prompt.get('score', 'N/A')}/100\n\n"
+            markdown_content += f"**Date:** {prompt.get('date_creation', 'N/A')}\n\n"
+            markdown_content += "### Contenu du Prompt\n\n"
+            markdown_content += f"```\n{prompt.get('prompt_text', 'N/A')}\n```\n\n"
+            markdown_content += "---\n\n"
+        
+        # Retourner comme fichier téléchargeable
+        return StreamingResponse(
+            io.BytesIO(markdown_content.encode('utf-8')),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
     except HTTPException:
         raise
     except Exception as e:

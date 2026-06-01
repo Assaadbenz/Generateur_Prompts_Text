@@ -1,0 +1,19 @@
+[theme]
+# Light theme (default)
+primaryColor = "#0055ff"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+# Dark theme colors
+# primaryColor = "#00d4ff"
+# backgroundColor = "#0e1117"
+# secondaryBackgroundColor = "#161b22"
+# textColor = "#c9d1d9"
+
+[client]
+showErrorDetails = true
+
+[logger]
+level = "info"

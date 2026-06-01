@@ -1,0 +1,54 @@
+2026-05-27 23:58:00 - backend.logger - INFO - Database initialized successfully
+2026-05-27 23:58:00 - backend.logger - INFO - Application started successfully
+2026-05-27 23:58:01 - backend.logger - INFO - Database initialized successfully
+2026-05-27 23:58:01 - backend.logger - INFO - Application started successfully
+2026-05-27 23:58:22 - backend.logger - INFO - Root endpoint accessed
+2026-05-27 23:58:53 - backend.logger - INFO - Database initialized successfully
+2026-05-27 23:58:53 - backend.logger - INFO - Application started successfully
+2026-05-27 23:58:55 - backend.logger - INFO - Database initialized successfully
+2026-05-27 23:58:55 - backend.logger - INFO - Application started successfully
+2026-05-27 23:58:58 - backend.logger - INFO - Root endpoint accessed
+2026-05-27 23:58:58 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-27 23:59:08 - backend.logger - INFO - Root endpoint accessed
+2026-05-27 23:59:08 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-27 23:59:45 - backend.logger - INFO - Root endpoint accessed
+2026-05-27 23:59:45 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-27 23:59:46 - backend.logger - INFO - Root endpoint accessed
+2026-05-27 23:59:46 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-27 23:59:47 - backend.logger - INFO - Root endpoint accessed
+2026-05-27 23:59:47 - backend.logger - INFO - Generating prompt for mission: lettre de motivation pour poste dev web au sein de
+2026-05-27 23:59:47 - backend.logger - INFO - Prompt generated with score: 70
+2026-05-27 23:59:47 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-27 23:59:51 - backend.logger - INFO - Root endpoint accessed
+2026-05-27 23:59:51 - backend.logger - INFO - Saving prompt: Prompt lettre de motivation
+2026-05-27 23:59:51 - backend.logger - INFO - Prompt saved with ID 73
+2026-05-27 23:59:51 - backend.logger - INFO - Prompt saved with ID: 73
+2026-05-27 23:59:51 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:00:08 - backend.logger - INFO - Root endpoint accessed
+2026-05-28 00:00:08 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:00:26 - backend.logger - INFO - Root endpoint accessed
+2026-05-28 00:00:26 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:04:56 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:04 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:31 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:31 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:34 - backend.logger - INFO - Generating prompt for mission: motif : srm
+2026-05-28 00:05:34 - backend.logger - INFO - Prompt generated with score: 70
+2026-05-28 00:05:34 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:37 - backend.logger - INFO - Saving prompt: Prompt motif : srm
+2026-05-28 00:05:37 - backend.logger - INFO - Prompt saved with ID 74
+2026-05-28 00:05:37 - backend.logger - INFO - Prompt saved with ID: 74
+2026-05-28 00:05:37 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:41 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:42 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:42 - backend.logger - INFO - Deleting prompt ID: 74
+2026-05-28 00:05:42 - backend.logger - INFO - Prompt 74 deleted: True
+2026-05-28 00:05:42 - backend.logger - INFO - Prompt deleted: 74
+2026-05-28 00:05:42 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:45 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
+2026-05-28 00:05:45 - backend.logger - INFO - Listing prompts - limit: 5, offset: 5
+2026-05-28 00:05:47 - backend.logger - INFO - Listing prompts - limit: 5, offset: 5
+2026-05-28 00:05:47 - backend.logger - INFO - Deleting prompt ID: 67
+2026-05-28 00:05:47 - backend.logger - INFO - Prompt 67 deleted: True
+2026-05-28 00:05:47 - backend.logger - INFO - Prompt deleted: 67
+2026-05-28 00:05:48 - backend.logger - INFO - Listing prompts - limit: 5, offset: 0
