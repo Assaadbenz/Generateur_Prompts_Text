@@ -1,55 +1,80 @@
+# ============================================================================
+# GÉNÉRATEUR DE PROMPTS - BACKEND API
+# ============================================================================
+# Cette API FastAPI génère et optimise des prompts pour les modèles IA
+# Elle fournit des endpoints pour créer, sauvegarder et chercher des prompts
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
-from typing import Dict, Any
+from pydantic import BaseModel, Field  # Pydantic = validation des données
+from typing import Dict, Any  # Types pour les annotations
 import sys
 from pathlib import Path
 import os
 import json
 import io
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # Charger les variables d'environnement du fichier .env
 
-# Load environment variables
+# Charger les variables d'environnement (API_BASE_URL, ALLOWED_ORIGINS, etc.)
 load_dotenv()
 
-# Ajouter le répertoire backend au path
+# Ajouter le répertoire backend au chemin Python pour les imports locaux
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Importer les fonctions de gestion de base de données
 from database import init_db, save_prompt, get_all_prompts, get_prompt_by_id, delete_prompt, count_prompts, search_prompts, count_search_prompts
+# Importer les fonctions d'optimisation de prompts
 from optimizer import calculate_quality_score, optimize_prompt
 
-# Get CORS origins from environment or use defaults
+# CORS (Cross-Origin Resource Sharing) permet au frontend (Streamlit) d'accéder à cette API
+# Récupérer les origines autorisées depuis les variables d'environnement
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:8501").split(",")
 
-# Initialiser l'app FastAPI
+# ============================================================================
+# INITIALISATION DE L'APPLICATION FASTAPI
+# ============================================================================
+# FastAPI crée automatiquement une documentation interactive à /docs
 app = FastAPI(
     title="Générateur de Prompts API",
     description="API pour générer et optimiser des prompts",
     version="1.0.0"
 )
 
-# Configuration CORS
+# Configuration CORS: autorise les requêtes depuis le frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,  # Domaines autorisés à faire des requêtes
+    allow_methods=["*"],             # Tous les méthodes HTTP (GET, POST, etc.)
+    allow_headers=["*"],             # Tous les headers HTTP
 )
 
-# Initialiser la base de données au démarrage
+# Créer la table de base de données au démarrage de l'API
 init_db()
 
 
 # ============================================================================
-# Modèles Pydantic
+# CONSTANTES ET MODÈLES DE VALIDATION
 # ============================================================================
+# Les modèles Pydantic valident automatiquement les données reçues de l'API
+# Cela évite les erreurs si les données ne sont pas du bon type/format
+
+# Nombre de mots pour chaque longueur de prompt
 LENGTH_WORDS = {"Courte": 100, "Moyenne": 300, "Longue": 500}
+# Tons possibles pour les prompts
 VALID_TONES = ["Très formel", "Formel", "Neutre", "Décontracté", "Très décontracté"]
+# Formats de sortie possibles
 VALID_FORMATS = ["Texte", "Liste", "Tableau", "Code"]
 
 
 class PromptRequest(BaseModel):
+    """Modèle de validation pour les requêtes de génération de prompts.
+    
+    Pydantic vérifie automatiquement:
+    - expertise: doit avoir entre 1 et 200 caractères
+    - mission: doit avoir entre 1 et 2000 caractères
+    - tone, output_format, length: doivent être dans les listes VALID_*
+    """
     expertise: str = Field(..., min_length=1, max_length=200, description="Domaine d'expertise")
     mission: str = Field(..., min_length=1, max_length=2000, description="Mission à accomplir")
     tone: str = Field(..., description="Ton souhaité")
@@ -57,7 +82,10 @@ class PromptRequest(BaseModel):
     length: str = Field(default="Moyenne", description="Longueur du prompt")
     
     def validate_inputs(self):
-        """Validate tone and format against allowed values."""
+        """Valide que le tone, format et length sont dans les listes autorisées.
+        
+        Lève une ValueError si l'une des valeurs n'est pas acceptée.
+        """
         if self.tone not in VALID_TONES:
             raise ValueError(f"Ton invalide. Valeurs acceptées: {VALID_TONES}")
         if self.output_format not in VALID_FORMATS:
@@ -77,17 +105,24 @@ class PromptOptimize(BaseModel):
 
 
 # ============================================================================
-# Routes
+# ENDPOINTS (Routes) DE L'API
 # ============================================================================
+# Les endpoints sont les "portes" pour accéder à l'API
+# @app.get = requête GET (lire des données)
+# @app.post = requête POST (créer/modifier des données)
+
 @app.get("/")
 async def root():
-    """Endpoint racine pour tester l'API."""
+    """Endpoint racine - simple test pour vérifier que l'API répond."""
     return {"message": "Bienvenue sur l'API Générateur de Prompts"}
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint to verify API is running."""
+    """Endpoint de vérification de santé - retourne OK si l'API fonctionne.
+    
+    Utilisé par le frontend pour vérifier que l'API est disponible.
+    """
     return {"status": "ok", "message": "API is running"}
 
 

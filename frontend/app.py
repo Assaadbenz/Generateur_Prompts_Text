@@ -1,78 +1,123 @@
-import streamlit as st
-import requests
-from typing import List, Dict, Any
-import pyperclip
-import os
-import json
-from dotenv import load_dotenv
+# ============================================================================
+# INTERFACE UTILISATEUR - GÉNÉRATEUR DE PROMPTS (STREAMLIT)
+# ============================================================================
+# Ce fichier crée l'interface web avec Streamlit
+# Streamlit permet de créer rapidement une app web sans HTML/CSS/JavaScript
+# L'app se connecte à l'API FastAPI pour générer et optimiser les prompts
 
-# Load environment variables from .env file
+# Imports nécessaires
+import streamlit as st  # Framework pour l'interface web
+import requests  # Pour faire des appels à l'API
+from typing import List, Dict, Any  # Types pour les annotations
+import pyperclip  # Pour copier du texte dans le presse-papiers
+import os  # Pour accéder aux variables d'environnement
+import json  # Pour traiter les données JSON
+from dotenv import load_dotenv  # Pour charger les variables d'environnement du fichier .env
+
+# Charger les variables d'environnement depuis le fichier .env
+# Cela permet de stocker les informations sensibles (URLs, clés, etc.)
 load_dotenv()
 
-# Configuration de la page
+# ============================================================================
+# CONFIGURATION STREAMLIT
+# ============================================================================
+# st.set_page_config() configure l'apparence générale de l'app
 st.set_page_config(
-    page_title="Générateur de Prompts",
-    page_icon="✨",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Générateur de Prompts",  # Titre dans l'onglet du navigateur
+    page_icon="✨",  # Icône dans l'onglet du navigateur
+    layout="wide",  # Utiliser la largeur complète de l'écran
+    initial_sidebar_state="expanded"  # Afficher la barre latérale par défaut
 )
 
-# URL de l'API - read from environment or use default
+# URL de l'API - lire depuis l'environnement ou utiliser par défaut
+# Cela permet de changer l'URL sans modifier le code
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
 # ============================================================================
-# Fonctions utilitaires
+# FONCTIONS UTILITAIRES
 # ============================================================================
 def check_api_health():
-    """Check if API is running."""
+    """Vérifie si l'API est en ligne et fonctionnelle.
+    
+    Retourne: True si l'API répond, False sinon
+    
+    Utilisation: Cette fonction est appelée au démarrage pour afficher
+    une alerte si l'API n'est pas disponible.
+    """
     try:
         response = requests.get(
-            f"{API_BASE_URL}/health",
-            timeout=5
+            f"{API_BASE_URL}/health",  # Endpoint de vérification de l'API
+            timeout=5  # Attendre maximum 5 secondes
         )
-        return response.status_code == 200
+        return response.status_code == 200  # 200 = succès
     except requests.exceptions.RequestException:
+        # Si la requête échoue (connexion refusée, timeout, etc.)
         return False
 
 
 def copy_to_clipboard(text: str):
+    """Copie du texte dans le presse-papiers et affiche une notification.
+    
+    Paramètres:
+    - text: le texte à copier
+    
+    Cette fonction utilise pyperclip pour copier le texte,
+    puis affiche un message de confirmation avec st.toast()
+    """
     try:
-        pyperclip.copy(text)
-        st.toast("✅ Copié !", icon="📋")
+        pyperclip.copy(text)  # Copier le texte
+        st.toast("✅ Copié !", icon="📋")  # Afficher une notification de succès
     except Exception as e:
-        st.toast(f"❌ Erreur: {e}", icon="⚠️")
+        st.toast(f"❌ Erreur: {e}", icon="⚠️")  # Afficher un message d'erreur
 
 
-# Initialiser les variables de session
+# ============================================================================
+# INITIALISATION DES VARIABLES DE SESSION
+# ============================================================================
+# st.session_state permet de stocker des données qui persistent
+# quand l'utilisateur interagit avec la page (sans recharger)
+# C'est comme des variables "mémoire" pour chaque session utilisateur
+
 if 'generated_prompt' not in st.session_state:
-    st.session_state.generated_prompt = None
+    st.session_state.generated_prompt = None  # Le prompt généré récemment
 if 'quality_score' not in st.session_state:
-    st.session_state.quality_score = None
+    st.session_state.quality_score = None  # Score du prompt généré
 if 'prompts_offset' not in st.session_state:
-    st.session_state.prompts_offset = 0
+    st.session_state.prompts_offset = 0  # Pagination des prompts sauvegardés
 if 'search_query' not in st.session_state:
-    st.session_state.search_query = ""
+    st.session_state.search_query = ""  # Termes de recherche
 if 'saved_mission' not in st.session_state:
-    st.session_state.saved_mission = ""
+    st.session_state.saved_mission = ""  # Dernière mission sauvegardée
 if 'optimization_result' not in st.session_state:
-    st.session_state.optimization_result = None
+    st.session_state.optimization_result = None  # Résultat de l'optimisation
 if 'dark_mode' not in st.session_state:
-    st.session_state.dark_mode = False
+    st.session_state.dark_mode = False  # Mode sombre activé ou pas
 if 'form_expertise' not in st.session_state:
-    st.session_state.form_expertise = ""
+    st.session_state.form_expertise = ""  # Champ expertise du formulaire
 if 'form_mission' not in st.session_state:
-    st.session_state.form_mission = ""
+    st.session_state.form_mission = ""  # Champ mission du formulaire
 if 'form_tone' not in st.session_state:
-    st.session_state.form_tone = "Neutre"
+    st.session_state.form_tone = "Neutre"  # Ton par défaut
 if 'form_format' not in st.session_state:
-    st.session_state.form_format = "Texte"
+    st.session_state.form_format = "Texte"  # Format par défaut
 if 'form_length' not in st.session_state:
-    st.session_state.form_length = "Moyenne"
+    st.session_state.form_length = "Moyenne"  # Longueur par défaut
 
 
 def fetch_prompts(limit: int = 5, offset: int = 0) -> tuple:
+    """Récupère une liste de prompts sauvegardés depuis l'API.
+    
+    Paramètres:
+    - limit: nombre de prompts à récupérer (par défaut 5)
+    - offset: nombre de prompts à sauter (pour la pagination)
+    
+    Retourne: tuple contenant (prompts, total, limit, offset)
+    - prompts: liste des prompts récupérés
+    - total: nombre total de prompts en base de données
+    """
     try:
+        # Faire une requête GET à l'API pour récupérer les prompts
         response = requests.get(
             f"{API_BASE_URL}/prompts",
             params={"limit": limit, "offset": offset},
@@ -88,6 +133,7 @@ def fetch_prompts(limit: int = 5, offset: int = 0) -> tuple:
 
 
 def search_prompts_api(query: str, limit: int = 5, offset: int = 0) -> tuple:
+    """Recherche des prompts qui contiennent la query."""
     try:
         response = requests.get(
             f"{API_BASE_URL}/prompts/search",
