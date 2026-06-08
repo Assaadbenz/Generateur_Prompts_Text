@@ -1,101 +1,79 @@
-def _extract_section(text: str, marker: str, after: str = "") -> str:
-    """Extrait le contenu d'une section du prompt."""
+def _has_substantial_content(text: str, marker: str) -> bool:
+    """Verifie si une section existe et a du contenu substantiel."""
     idx = text.lower().find(marker.lower())
     if idx == -1:
-        return ""
-    start = idx + len(marker)
-    if after:
-        aidx = text.lower().find(after.lower(), start)
-        if aidx != -1:
-            start = aidx + len(after)
-    # Prendre jusqu'à la prochaine ligne vide ou fin
-    end = text.find("\n\n", start)
-    if end == -1:
-        end = len(text)
-    return text[start:end].strip()
+        return False
+    # Verifier qu'il y a plus que juste le marqueur
+    section_start = idx + len(marker)
+    section_end = text.find("\n", section_start) if section_start < len(text) else section_start
+    content = text[section_start:section_end].strip()
+    return len(content) > 5  # Au moins 5 caracteres
 
 
 def calculate_quality_score(prompt_text: str) -> int:
     """
     Calcule un score de qualité (0-100).
-    
-    - Sections présentes (expert, mission, consignes, format): 8pts chacune = 32
-    - Profondeur de la mission (selon longueur du texte): 0-25
-    - Spécificité de l'expertise: 0-15
-    - Format de sortie mentionné: 8
-    - Longueur mentionnée: 8
-    - Qualité globale du prompt: 0-12
+    25 points par section substantielle (Expert, Mission, Consignes, Format) = 100pts
     """
-    lower = prompt_text.lower()
+    score = 0
     
-    sections = ["expert", "mission", "consignes", "format"]
-    score = sum(8 for s in sections if s in lower)
-    
-    mission_text = _extract_section(prompt_text, "Mission :")
-    if mission_text:
-        ml = len(mission_text)
-        if ml > 200:
-            score += 25
-        elif ml > 100:
-            score += 20
-        elif ml > 50:
-            score += 15
-        elif ml > 20:
-            score += 8
-        else:
-            score += 3
-    
-    expert_text = _extract_section(prompt_text, "Tu es un expert en", "en ")
-    if expert_text:
-        el = len(expert_text)
-        if el > 30:
-            score += 15
-        elif el > 15:
-            score += 10
-        elif el > 5:
-            score += 5
-    
-    if "format :" in lower:
-        score += 8
-    if "longueur :" in lower:
-        score += 8
-    
-    if len(prompt_text) > 300:
-        score += 12
-    elif len(prompt_text) > 150:
-        score += 6
+    # 25 points par section presente ET substantielle
+    if _has_substantial_content(prompt_text, "Expert"):
+        score += 25
+    if _has_substantial_content(prompt_text, "Mission"):
+        score += 25
+    if _has_substantial_content(prompt_text, "Consignes"):
+        score += 25
+    if _has_substantial_content(prompt_text, "Format"):
+        score += 25
     
     return min(score, 100)
 
 
 def optimize_prompt(prompt_text: str) -> dict:
+    """
+    Genere des suggestions logiques et progressives pour ameliorer le prompt.
+    Ordre logique: 1) Role (Expert) 2) But (Mission) 3) Instructions (Consignes) 4) Sortie (Format)
+    """
     score = calculate_quality_score(prompt_text)
-    optimized = prompt_text
     missing_keywords = []
     suggestions = []
     
-    checks = {"Expert": "expert", "Mission": "mission", "Consignes": "consignes", "Format": "format"}
-    for label, keyword in checks.items():
-        if keyword not in prompt_text.lower():
-            missing_keywords.append(label)
-            suggestions.append(f"Ajoutez une section **{label}** : décrivez le {label.lower()} attendu")
+    # Verifications dans l'ordre logique
+    sections = [
+        ("Expert", "Define the AI's role and expertise"),
+        ("Mission", "Explain what needs to be accomplished"),
+        ("Consignes", "Provide step-by-step instructions"),
+        ("Format", "Specify the output format needed")
+    ]
     
-    mission_text = _extract_section(prompt_text, "Mission :")
-    if mission_text and len(mission_text) < 50:
-        suggestions.append("**Mission** trop courte : détaillez davantage la tâche à accomplir (+50 caractères)")
+    for section, description in sections:
+        if not _has_substantial_content(prompt_text, section):
+            missing_keywords.append(section)
     
-    expert_text = _extract_section(prompt_text, "Tu es un expert en", "en ")
-    if expert_text and len(expert_text) < 15:
-        suggestions.append("**Mission** : manque de mots-clés, soyez plus précis dans la description")
-    elif mission_text and len(expert_text) >= 15 and len(mission_text) < 50:
-        suggestions.append("**Mission** : manque de mots-clés, soyez plus précis dans la description")
+    # Generer les suggestions en ordre logique et progressive
+    if not _has_substantial_content(prompt_text, "Expert"):
+        suggestions.append("1️⃣ RÔLE: Ajoute 'Tu es un expert en [domaine]' - Définis d'abord l'expertise")
     
-    if not suggestions:
-        suggestions.append("Le prompt est bien structuré et complet")
+    if not _has_substantial_content(prompt_text, "Mission"):
+        suggestions.append("2️⃣ OBJECTIF: Ajoute 'Mission: [description]' - Explique la tâche à accomplir")
+    
+    if not _has_substantial_content(prompt_text, "Consignes"):
+        suggestions.append("3️⃣ ÉTAPES: Ajoute 'Consignes: [instructions]' - Donne les étapes à suivre")
+    
+    if not _has_substantial_content(prompt_text, "Format"):
+        suggestions.append("4️⃣ FORMAT: Ajoute 'Format: [JSON/Liste/Texte]' - Spécifie le format de sortie")
+    
+    # Perfect score feedback
+    if score == 100:
+        suggestions = ["✅ PARFAIT! Score 100/100 - Votre prompt est complet et pret a utiliser!"]
+    else:
+        # Max 2 suggestions at a time (focus on what matters most)
+        suggestions = suggestions[:2]
     
     return {
         "original_prompt": prompt_text,
-        "optimized_prompt": optimized,
+        "optimized_prompt": prompt_text,
         "score": score,
         "missing_keywords": missing_keywords,
         "suggestions": suggestions

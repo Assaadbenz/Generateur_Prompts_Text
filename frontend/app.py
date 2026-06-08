@@ -59,6 +59,16 @@ if 'optimization_result' not in st.session_state:
     st.session_state.optimization_result = None
 if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = False
+if 'form_expertise' not in st.session_state:
+    st.session_state.form_expertise = ""
+if 'form_mission' not in st.session_state:
+    st.session_state.form_mission = ""
+if 'form_tone' not in st.session_state:
+    st.session_state.form_tone = "Neutre"
+if 'form_format' not in st.session_state:
+    st.session_state.form_format = "Texte"
+if 'form_length' not in st.session_state:
+    st.session_state.form_length = "Moyenne"
 
 
 def fetch_prompts(limit: int = 5, offset: int = 0) -> tuple:
@@ -279,34 +289,47 @@ with col_form:
     
     expertise = st.text_input(
         "Expertise",
+        value=session.form_expertise,
         placeholder="ex: Marketing, Développement, Rédaction...",
-        help="Domaine d'expertise du modèle"
+        help="Domaine d'expertise du modèle",
+        key="expertise_input"
     )
+    session.form_expertise = expertise
     
     mission = st.text_area(
         "Mission",
+        value=session.form_mission,
         placeholder="Décrivez précisément ce que le modèle doit faire...",
         height=100,
-        help="La tâche à accomplir"
+        help="La tâche à accomplir",
+        key="mission_input"
     )
+    session.form_mission = mission
     
     output_format = st.selectbox(
         "Format de sortie",
         options=["Texte", "Liste", "Tableau", "Code"],
-        help="Format attendu pour la réponse"
+        index=["Texte", "Liste", "Tableau", "Code"].index(session.form_format),
+        help="Format attendu pour la réponse",
+        key="format_input"
     )
+    session.form_format = output_format
     
     tone = st.select_slider(
         "Ton",
         options=["Très formel", "Formel", "Neutre", "Décontracté", "Très décontracté"],
-        value="Neutre"
+        value=session.form_tone,
+        key="tone_input"
     )
+    session.form_tone = tone
     
     length = st.select_slider(
         "Longueur",
         options=["Courte", "Moyenne", "Longue"],
-        value="Moyenne"
+        value=session.form_length,
+        key="length_input"
     )
+    session.form_length = length
     
     col_btn1, col_btn2 = st.columns(2)
     
@@ -369,7 +392,18 @@ with col_result:
         with col_save2:
             if st.button("💾 Sauvegarder", use_container_width=True):
                 if titre_save:
-                    save_prompt_to_db(titre_save, session.generated_prompt, session.quality_score)
+                    if save_prompt_to_db(titre_save, session.generated_prompt, session.quality_score):
+                        # Reinitialiser completement le formulaire et les resultats
+                        session.generated_prompt = None
+                        session.quality_score = None
+                        session.optimization_result = None
+                        session.form_expertise = ""
+                        session.form_mission = ""
+                        session.form_tone = "Neutre"
+                        session.form_format = "Texte"
+                        session.form_length = "Moyenne"
+                        st.success("Prompt sauvegarde! Tous les champs ont ete effaces.")
+                        st.rerun()
         
         # Boutons d'export
         st.markdown("---")
@@ -422,45 +456,60 @@ if st.session_state.dark_mode:
     dark_css = """
     <style>
     :root {
-        --bg-color: #0e1117;
-        --secondary-bg: #161b22;
-        --text-color: #c9d1d9;
-        --border-color: #30363d;
-        --input-bg: #0d1117;
+        --bg-color: #0a0e27;
+        --secondary-bg: #1a1f3a;
+        --tertiary-bg: #2a2f4a;
+        --text-color: #e0e6f6;
+        --text-muted: #a0a8c0;
+        --border-color: #3a4060;
+        --input-bg: #12172d;
+        --accent-blue: #5BB3E8;
+        --accent-blue-hover: #7EC8F0;
     }
     
     html, body, [data-testid="stAppViewContainer"] {
-        background-color: #0e1117 !important;
-        color: #c9d1d9 !important;
+        background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%) !important;
+        color: #e0e6f6 !important;
     }
     
     [data-testid="stHeader"] {
-        background-color: #0e1117 !important;
+        background-color: rgba(10, 14, 39, 0.8) !important;
+        border-bottom: 1px solid #3a4060 !important;
     }
     
     [data-testid="stSidebar"] {
-        background-color: #161b22 !important;
+        background: linear-gradient(180deg, #1a1f3a 0%, #2a2f4a 100%) !important;
+        border-right: 1px solid #3a4060 !important;
     }
     
     [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
-        color: #c9d1d9 !important;
+        color: #e0e6f6 !important;
     }
     
     .stTabs [data-testid="stMarkdownContainer"] {
-        color: #c9d1d9 !important;
+        color: #e0e6f6 !important;
     }
     
     .stTextInput > div > div > input,
     .stTextArea textarea,
     .stSelectbox > div > div > select {
-        background-color: #0d1117 !important;
-        color: #c9d1d9 !important;
-        border-color: #30363d !important;
+        background-color: #12172d !important;
+        color: #e0e6f6 !important;
+        border: 1.5px solid #3a4060 !important;
+        border-radius: 6px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stTextInput > div > div > input:focus,
+    .stTextArea textarea:focus,
+    .stSelectbox > div > div > select:focus {
+        border-color: #5BB3E8 !important;
+        box-shadow: 0 0 0 3px rgba(91, 179, 232, 0.1) !important;
     }
     
     .stSelectbox > div > div > div,
     .stSelectbox > div > div > input {
-        color: #c9d1d9 !important;
+        color: #e0e6f6 !important;
     }
     
     [data-testid="stVerticalBlock"] > [style*="flex-direction"] > [data-testid="stVerticalBlock"] {
@@ -468,91 +517,130 @@ if st.session_state.dark_mode:
     }
     
     .stExpander {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
+        background-color: #1a1f3a !important;
+        border: 1.5px solid #3a4060 !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
     }
     
     .stExpander [data-testid="stExpanderDetails"] {
-        background-color: #0d1117 !important;
+        background-color: #12172d !important;
     }
     
     .stCode {
-        background-color: #0d1117 !important;
-        border: 1px solid #30363d !important;
+        background-color: #12172d !important;
+        border: 1.5px solid #3a4060 !important;
+        border-radius: 8px !important;
     }
     
     pre {
-        background-color: #0d1117 !important;
-        color: #c9d1d9 !important;
+        background-color: #12172d !important;
+        color: #e0e6f6 !important;
+        border-radius: 6px !important;
+        padding: 1rem !important;
     }
     
     code {
-        background-color: #161b22 !important;
-        color: #79c0ff !important;
-        border-color: #30363d !important;
+        background-color: #1a1f3a !important;
+        color: #7EC8F0 !important;
+        border-color: #3a4060 !important;
+        border-radius: 4px !important;
     }
     
     .stMetric {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
-        border-radius: 0.5rem;
-        padding: 1rem;
+        background: linear-gradient(135deg, #1a1f3a 0%, #2a2f4a 100%) !important;
+        border: 1.5px solid #3a4060 !important;
+        border-radius: 8px !important;
+        padding: 1.2rem !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3) !important;
     }
     
     .stMetric > div > div > h3,
     .stMetric > div > div > p {
-        color: #c9d1d9 !important;
+        color: #e0e6f6 !important;
     }
     
-    h1, h2, h3, h4, h5, h6, label, p, span, div {
-        color: #c9d1d9 !important;
+    h1 {
+        color: #e0e6f6 !important;
+        font-weight: 700 !important;
+    }
+    
+    h2, h3, h4, h5, h6 {
+        color: #e0e6f6 !important;
+        font-weight: 600 !important;
+    }
+    
+    label, p, span {
+        color: #e0e6f6 !important;
     }
     
     .stButton > button {
-        background-color: #1f6feb !important;
-        color: #c9d1d9 !important;
-        border: 1px solid #1f6feb !important;
+        background: linear-gradient(135deg, #5BB3E8 0%, #4A9FD8 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 6px !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 12px rgba(91, 179, 232, 0.25) !important;
     }
     
     .stButton > button:hover {
-        background-color: #388bfd !important;
+        background: linear-gradient(135deg, #7EC8F0 0%, #5BB3E8 100%) !important;
+        box-shadow: 0 6px 20px rgba(91, 179, 232, 0.4) !important;
+        transform: translateY(-2px) !important;
     }
     
     .stButton > button[data-testid="baseButton-secondary"] {
-        background-color: #1f6feb !important;
-        border: 1px solid #1f6feb !important;
+        background: linear-gradient(135deg, #5BB3E8 0%, #4A9FD8 100%) !important;
+        border: none !important;
     }
     
     .stButton > button[data-testid="baseButton-secondary"]:hover {
-        background-color: #388bfd !important;
+        background: linear-gradient(135deg, #7EC8F0 0%, #5BB3E8 100%) !important;
+        box-shadow: 0 6px 20px rgba(91, 179, 232, 0.4) !important;
+        transform: translateY(-2px) !important;
     }
     
     [data-testid="stNotification"] {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
+        background-color: #1a1f3a !important;
+        border: 1.5px solid #3a4060 !important;
+        border-radius: 8px !important;
     }
     
     .streamlit-expanderHeader {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
+        background-color: #1a1f3a !important;
+        border: none !important;
     }
     
     .streamlit-expanderContent {
-        background-color: #0d1117 !important;
+        background-color: #12172d !important;
     }
     
     [data-testid="stMarkdownContainer"] {
-        color: #c9d1d9 !important;
+        color: #e0e6f6 !important;
     }
     
     /* Info/Success/Error/Warning boxes */
     [data-testid="stAlert"] {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
+        background: linear-gradient(135deg, #1a1f3a 0%, #2a2f4a 100%) !important;
+        border: 1.5px solid #3a4060 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
     }
     
     [data-testid="stAlert"] > div {
-        color: #c9d1d9 !important;
+        color: #e0e6f6 !important;
+    }
+    
+    /* Column separators and dividers */
+    hr {
+        border-color: #3a4060 !important;
+        opacity: 0.5 !important;
+    }
+    
+    /* Progress bars */
+    .stProgress > div > div {
+        background-color: #5BB3E8 !important;
     }
     </style>
     """
@@ -644,22 +732,22 @@ else:
     }
     
     .stButton > button {
-        background-color: #0055ff !important;
+        background-color: #5BB3E8 !important;
         color: #ffffff !important;
-        border: 1px solid #0055ff !important;
+        border: 1px solid #5BB3E8 !important;
     }
     
     .stButton > button:hover {
-        background-color: #0969da !important;
+        background-color: #7EC8F0 !important;
     }
     
     .stButton > button[data-testid="baseButton-secondary"] {
-        background-color: #0055ff !important;
-        border: 1px solid #0055ff !important;
+        background-color: #5BB3E8 !important;
+        border: 1px solid #5BB3E8 !important;
     }
     
     .stButton > button[data-testid="baseButton-secondary"]:hover {
-        background-color: #0969da !important;
+        background-color: #7EC8F0 !important;
     }
     
     [data-testid="stNotification"] {
