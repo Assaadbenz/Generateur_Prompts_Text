@@ -409,9 +409,14 @@ with col_form:
     if session.optimization_result:
         st.markdown("---")
         st.markdown("### 🔧 Suggestions d'optimisation")
-        for s in session.optimization_result.get("suggestions", []):
-            st.markdown(f"- {s}")
-        st.caption(f"Score : {session.optimization_result.get('score', session.quality_score)}/100")
+        suggestions = session.optimization_result.get("suggestions", [])
+        for s in suggestions:
+            st.markdown(f"> {s}")
+        
+        # Dimensions faibles en rouge
+        missing = session.optimization_result.get("missing_keywords", [])
+        if missing:
+            st.caption(f"⚠️ Points faibles : {', '.join(missing)}")
 
 
 # ============================================================================
@@ -425,11 +430,48 @@ with col_result:
         st.markdown("### Prompt généré")
         st.code(session.generated_prompt, language="text")
         
-        # Barre de score
+        # Score de qualité
         if session.quality_score is not None:
-            st.markdown("### Score de qualité")
-            st.progress(session.quality_score / 100)
-            st.metric("Score", f"{session.quality_score}/100")
+            st.markdown("### 📊 Score de qualité")
+            
+            score = session.quality_score
+            # Couleur selon le niveau
+            if score >= 80:
+                niveau = "🟢 Excellent"
+            elif score >= 60:
+                niveau = "🟡 Bon"
+            elif score >= 40:
+                niveau = "🟠 Moyen"
+            else:
+                niveau = "🔴 Insuffisant"
+            
+            col_sc1, col_sc2 = st.columns([2, 1])
+            with col_sc1:
+                st.progress(score / 100)
+            with col_sc2:
+                st.metric("Score global", f"{score}/100", help=niveau)
+            
+            # Breakdown par dimension (affiché après optimisation)
+            breakdown = (session.optimization_result or {}).get("breakdown", {})
+            if breakdown:
+                st.markdown("**Détail par dimension :**")
+                dim_icons = {
+                    "Structure":   "🏗️",
+                    "Longueur":    "📏",
+                    "Spécificité": "🔢",
+                }
+                for dim, vals in breakdown.items():
+                    icon = dim_icons.get(dim, "•")
+                    pct = vals["pct"]
+                    s_dim = vals["score"]
+                    max_dim = vals["max"]
+                    col_lbl, col_bar, col_val = st.columns([2, 4, 1])
+                    with col_lbl:
+                        st.caption(f"{icon} {dim}")
+                    with col_bar:
+                        st.progress(pct / 100)
+                    with col_val:
+                        st.caption(f"{s_dim}/{max_dim}")
         
         # Bouton pour sauvegarder
         col_save1, col_save2 = st.columns(2)
