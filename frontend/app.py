@@ -156,12 +156,13 @@ def generate_prompt(expertise: str, mission: str, tone: str, output_format: str,
             "mission": mission,
             "tone": tone,
             "output_format": output_format,
-            "length": length
+            "length": length,
+            "api_key": st.session_state.get("gemini_api_key", "")
         }
         response = requests.post(
             f"{API_BASE_URL}/generate",
             json=payload,
-            timeout=10
+            timeout=25
         )
         if response.status_code == 200:
             return response.json()
@@ -186,11 +187,14 @@ def generate_prompt(expertise: str, mission: str, tone: str, output_format: str,
 def optimize_prompt(prompt_text: str) -> Dict[str, Any]:
     """Optimise un prompt via l'API."""
     try:
-        payload = {"prompt_text": prompt_text}
+        payload = {
+            "prompt_text": prompt_text,
+            "api_key": st.session_state.get("gemini_api_key", "")
+        }
         response = requests.post(
             f"{API_BASE_URL}/optimize",
             json=payload,
-            timeout=10
+            timeout=25
         )
         if response.status_code == 200:
             return response.json()
@@ -396,12 +400,14 @@ with col_form:
     with col_btn2:
         if st.button("🔧 Optimiser", use_container_width=True):
             if session.generated_prompt:
-                with st.spinner("Optimisation en cours..."):
+                with st.spinner("Optimisation par l'IA en cours..."):
                     result = optimize_prompt(session.generated_prompt)
                     if result:
+                        session.generated_prompt = result.get("optimized_prompt", session.generated_prompt)
                         session.quality_score = result.get("score")
                         session.optimization_result = result
-                        st.toast("✅ Optimisation terminée", icon="🔧")
+                        st.toast("✅ Optimisation par l'IA terminée", icon="🔧")
+                        st.rerun()
             else:
                 st.warning("Générez d'abord un prompt")
     
@@ -882,6 +888,21 @@ with st.sidebar:
             st.session_state.dark_mode = not st.session_state.dark_mode
             st.rerun()
     
+    st.markdown("---")
+    st.markdown("### 🤖 Moteur IA Google Gemini")
+    default_key = os.getenv("GEMINI_API_KEY", "")
+    gemini_key = st.text_input(
+        "Clé API Google Gemini",
+        value=st.session_state.get("gemini_api_key", default_key),
+        type="password",
+        help="Clé API Gemini (gratuite sur aistudio.google.com). Si vide, utilise la clé du fichier .env."
+    )
+    st.session_state.gemini_api_key = gemini_key
+    if gemini_key:
+        st.caption("🟢 IA Google Gemini connectée")
+    else:
+        st.caption("⚪ Mode démo (ajoutez votre clé Gemini pour l'IA en direct)")
+
     st.markdown("---")
     st.subheader("📚 Historique")
     

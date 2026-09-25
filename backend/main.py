@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field  # Pydantic = validation des données
-from typing import Dict, Any  # Types pour les annotations
+from typing import Dict, Any, Optional  # Types pour les annotations
 import sys
 from pathlib import Path
 import os
@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 # Importer les fonctions de gestion de base de données
 from database import init_db, save_prompt, get_all_prompts, get_prompt_by_id, delete_prompt, count_prompts, search_prompts, count_search_prompts
 # Importer les fonctions d'optimisation de prompts
-from optimizer import calculate_quality_score, optimize_prompt
+from optimizer import calculate_quality_score, optimize_prompt, get_score_breakdown
 
 # CORS (Cross-Origin Resource Sharing) permet au frontend (Streamlit) d'accéder à cette API
 # Récupérer les origines autorisées depuis les variables d'environnement
@@ -80,6 +80,7 @@ class PromptRequest(BaseModel):
     tone: str = Field(..., description="Ton souhaité")
     output_format: str = Field(default="Texte", description="Format de sortie")
     length: str = Field(default="Moyenne", description="Longueur du prompt")
+    api_key: Optional[str] = Field(default=None, description="Clé API Gemini optionnelle")
     
     def validate_inputs(self):
         """Valide que le tone, format et length sont dans les listes autorisées.
@@ -102,6 +103,7 @@ class PromptResponse(BaseModel):
 
 class PromptOptimize(BaseModel):
     prompt_text: str = Field(..., min_length=1)
+    api_key: Optional[str] = Field(default=None, description="Clé API Gemini optionnelle")
 
 
 # ============================================================================
@@ -127,38 +129,24 @@ async def health_check():
 
 
 @app.post("/generate")
-async def generate_prompt(request: PromptRequest) -> Dict[str, Any]:
+def generate_prompt(request: PromptRequest) -> Dict[str, Any]:
     """
-    Génère un prompt basé sur les paramètres fournis.
-    
-    Args:
-        request.expertise: Domaine d'expertise
-        request.mission: Mission à accomplir
-        request.tone: Ton souhaité
-        request.output_format: Format de sortie
-        request.length: Longueur du prompt
-    
-    Returns:
-        Prompt généré avec son score de qualité
+    Génère un prompt basé sur les paramètres fournis en utilisant l'API d'IA Google Gemini.
     """
     try:
         # Validate input parameters
         request.validate_inputs()
         
-        word_count = LENGTH_WORDS.get(request.length, 300)
-        prompt_text = f"""Tu es un expert en {request.expertise}.
-
-📋 Mission :
-{request.mission}
-
-🎯 Consignes :
-- Adopte un ton {request.tone.lower()}
-- Réponds au format : {request.output_format}
-- Longueur : {request.length} (~{word_count} mots)
-- Sois précis, structuré et pertinent
-- Adapte ta réponse à la mission confiée
-
-📝 Réponse :"""
+        # Générer avec l'API d'IA Google Gemini
+        from gemini_service import generate_prompt_ai
+        prompt_text = generate_prompt_ai(
+            expertise=request.expertise,
+            mission=request.mission,
+            tone=request.tone,
+            output_format=request.output_format,
+            length=request.length,
+            api_key=request.api_key
+        )
 
         score = calculate_quality_score(prompt_text)
         
@@ -172,19 +160,27 @@ async def generate_prompt(request: PromptRequest) -> Dict[str, Any]:
 
 
 @app.post("/optimize")
-async def optimize(request: PromptOptimize) -> Dict[str, Any]:
+def optimize(request: PromptOptimize) -> Dict[str, Any]:
     """
-    Optimise un prompt existant.
-    
-    Args:
-        prompt_text: Le prompt à optimiser
-    
-    Returns:
-        Prompt optimisé avec score et recommandations
+    Optimise un prompt existant en utilisant l'API d'IA Google Gemini.
     """
     try:
-        result = optimize_prompt(request.prompt_text)
-        return result
+        from gemini_service import optimize_prompt_ai
+        ai_result = optimize_prompt_ai(request.prompt_text, api_key=request.api_key)
+        optimized_text = ai_result.get("optimized_prompt", request.prompt_text)
+        
+        # Calculer le score et les détails du prompt optimisé
+        score = calculate_quality_score(optimized_text)
+        details = get_score_breakdown(optimized_text)
+        
+        return {
+            "original_prompt": request.prompt_text,
+            "optimized_prompt": optimized_text,
+            "score": score,
+            "breakdown": details["breakdown"],
+            "missing_keywords": [dim for dim, v in details["breakdown"].items() if v["pct"] < 50],
+            "suggestions": ai_result.get("suggestions", details["all_feedbacks"][:3])
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -2,3 +2,7 @@ prompts.db
 __pycache__/
 *.pyc
 .env
+logs/
+.pytest_cache/
+.coverage
+venv/
